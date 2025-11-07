@@ -1,0 +1,214 @@
+﻿🎵 AI Generated Compose-It
+
+
+Product Requirements & Implementation Specification
+
+
+------------------------------------------------------------------------
+
+
+0. Assumptions to Resolve Ambiguities
+
+
+-   Axes: X-axis = time (beats); Y-axis = pitch (rows).
+    Note: Original text said “each square along the Y-axis represents
+    one beat,” but durations, barlines, and timing imply X=time.
+    Implement X=time, Y=pitch.
+-   Polyphony: Multiple notes can play simultaneously across rows, but
+    notes cannot overlap on the same row.
+-   Playback Span:
+    -   4/4: 16 beats (4 measures of 4)
+    -   3/4: 12 beats (4 measures of 3)
+-   Audio Export: Browsers can’t encode mp3/AAC directly. MVP exports
+    WAV or WebM. mp3 Audio = Phase 2 (serverless encoder).
+
+
+------------------------------------------------------------------------
+
+
+1. Tech Stack
+
+
+-   Framework: SvelteKit
+-   Language: TypeScript
+-   Audio Library: Tone.js
+-   Graphics Engine: PixiJS (grid, note blocks, playhead)
+-   Storage: Local JSON file + LocalStorage (autosave)
+-   Deployment: Cloudflare Pages (static, global CDN)
+
+
+------------------------------------------------------------------------
+
+
+2. Overview
+
+
+AI Generated Compose-It is an interactive rhythm and melody composition
+game. Users place color-coded rhythmic blocks onto a time-pitch grid.
+Players can choose meters (4/4 or 3/4), scales, tempos, and export their
+music as visual (PDF) or audio (WAV/mp3) files.
+
+
+------------------------------------------------------------------------
+
+
+3. Screen Flow
+
+
+-   Home Screen:
+    -   Title: “Compose-It”
+    -   Two time signature options:
+        -   4/4 (Groupings of four pulses)
+        -   3/4 (Groupings of three pulses)
+    -   After selection, popup prompts for scale:
+        -   C Major Diatonic
+        -   C Pentatonic
+        -   A Harmonic Minor
+
+
+------------------------------------------------------------------------
+
+
+4. Grid Layouts
+
+
+All grids have black lines, with heavier barlines indicating measure
+divisions.
+
+
+-   4/4 Meter: 16×15 grid
+    Heavy lines before columns 1, 5, 9, 13, and after final column.
+-   3/4 Meter: 12×15 grid
+    Heavy lines before columns 1, 4, 7, 10, and after final column.
+-   C Major Diatonic: 16×15
+-   C Pentatonic: 16×11
+-   A Harmonic Minor: 16×15
+
+
+------------------------------------------------------------------------
+
+
+5. Y-Axis Scales
+
+
+-   C Major Diatonic: C–D–E–F–G–A–B (repeats, C3–C5)
+-   C Pentatonic: C–D–E–G–A (repeats, C3–C5)
+-   A Harmonic Minor: A–B–C–D–E–F–G# (repeats, A3–A5)
+
+
+------------------------------------------------------------------------
+
+
+6. Note Shape Palette
+
+
+Each colored rectangle represents a rhythmic duration (width on X-axis).
+All are draggable and height-fitted to grid squares.
+
+
+  Color           Duration    Note Type
+  --------------- ----------- ----------------
+  🔴 Red          4 beats     Whole (only 4/4)
+  🟠 Orange       3 beats     Dotted Half
+  🟡 Yellow       2 beats     Half
+  🟢 Green        1.5 beats   Dotted Quarter
+  🔵 Light Blue   1 beat      Quarter
+  🔷 Dark Blue    0.75 beat   Dotted Eighth
+  💗 Pink         0.5 beat    Eighth
+  🤎 Brown        ⅓ beat      Triplet Eighth
+  🟣 Purple       ¼ beat      Sixteenth
+
+
+Duplicate copies can be dragged from the palette below the grid.
+
+
+------------------------------------------------------------------------
+
+
+7. Placement Validation
+
+
+-   ❌ Red highlight: appears when note crosses barlines or exceeds grid
+    length.
+-   ✅ Green highlight: appears when placement is valid.
+-   Validation applies to both single notes and motifs.
+
+
+------------------------------------------------------------------------
+
+
+8. Audio Behavior
+
+
+-   Each column = 1 beat; shape width = note duration.
+-   Each row = pitch determined by scale.
+-   Playback engine: Tone.js (brass ensemble timbre).
+-   No silences between notes.
+-   Tempos:
+    -   Adagio: 60 BPM
+    -   Andante: 80 BPM (default)
+    -   Allegro: 120 BPM
+-   A red playhead line sweeps left → right during playback.
+
+
+------------------------------------------------------------------------
+
+
+9. Controls
+
+
+Top Navigation Bar:
+
+
+-   ▶️ Play — Starts playback
+-   🔁 Restart — Resets playhead to start
+-   🧹 Clear — Prompts “Clear grid?” (Yes/No)
+-   ⏱ Tempo — Dropdown: Adagio / Andante / Allegro
+-   💾 Save — Opens save dialog (see next section)
+
+
+------------------------------------------------------------------------
+
+
+10. Save & Export
+
+
+When saving, user is prompted to name their composition and select
+export options:
+
+
+-   PDF: Downloads grid as visual chart
+-   PDF: Generates PDF version using standard musical notation in sheet music
+-   Audio: Renders WAV (Phase 2: mp3/encoded)
+-   Both: Exports both files
+-   JSON Save: Preserves working project for reload
+
+
+------------------------------------------------------------------------
+
+
+11. Motifs
+
+
+-   User selects “Motif” button (bottom-left) and drags cursor to
+    highlight shapes.
+-   Highlighted shapes are grouped as a reusable motif pattern.
+-   Motifs can be re-dragged to the grid and follow placement validation
+    rules.
+
+
+------------------------------------------------------------------------
+
+
+12. Background Image
+
+
+-   Optional JPEG background can be imported and layered behind the
+    transparent grid.
+-   Stays fixed behind all note and grid layers.
+
+
+------------------------------------------------------------------------
+
+
+© 2025 Compose-It. Specification generated for Codex implementation.
