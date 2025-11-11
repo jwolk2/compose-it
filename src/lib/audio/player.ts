@@ -5,23 +5,73 @@ import { TEMPOS } from '$lib/constants/music';
 import { gridDurationSeconds, ticksToSeconds } from '$lib/utils/noteTiming';
 import { audioBufferToWav, toneBufferToAudioBuffer } from '$lib/utils/audio';
 
-const SYNTH_OPTIONS = {
-	volume: -6,
-	oscillator: { type: 'fattriangle' },
-	envelope: {
-		attack: 0.05,
-		decay: 0.3,
-		sustain: 0.4,
-		release: 1.4,
-		attackCurve: 'linear',
-		decayCurve: 'exponential',
-		releaseCurve: 'exponential'
-	}
-} as Tone.SynthOptions;
+type SamplerConfig = Pick<Tone.SamplerOptions, 'urls' | 'baseUrl'> &
+	Partial<Omit<Tone.SamplerOptions, 'urls' | 'baseUrl'>>;
 
-let synth: Tone.PolySynth<Tone.Synth> | null = null;
-let reverb: Tone.Reverb | null = null;
-let chorus: Tone.Chorus | null = null;
+const PIANO_SAMPLER_OPTIONS: SamplerConfig = {
+	baseUrl: 'https://tonejs.github.io/audio/salamander/',
+	release: 0.75,
+	urls: {
+		A2: 'A2.mp3',
+		C3: 'C3.mp3',
+		'D#3': 'Ds3.mp3',
+		'F#3': 'Fs3.mp3',
+		A3: 'A3.mp3',
+		C4: 'C4.mp3',
+		'D#4': 'Ds4.mp3',
+		'F#4': 'Fs4.mp3',
+		A4: 'A4.mp3'
+	}
+};
+
+const HORN_SAMPLER_OPTIONS: SamplerConfig = {
+	baseUrl: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/french_horn-mp3/',
+	attack: 0.03,
+	release: 1.4,
+	urls: {
+		C2: 'C2.mp3',
+		E2: 'E2.mp3',
+		G2: 'G2.mp3',
+		B2: 'B2.mp3',
+		D3: 'D3.mp3',
+		F3: 'F3.mp3',
+		A3: 'A3.mp3',
+		C4: 'C4.mp3',
+		E4: 'E4.mp3'
+	}
+};
+
+const createSampler = (config: SamplerConfig) => {
+	let resolveLoad: (() => void) | null = null;
+	let rejectLoad: ((error: Error) => void) | null = null;
+	const loaded = new Promise<void>((resolve, reject) => {
+		resolveLoad = resolve;
+		rejectLoad = reject;
+	});
+	const { onload, onerror, ...rest } = config;
+	const sampler = new Tone.Sampler({
+		...(rest as Tone.SamplerOptions),
+		urls: config.urls,
+		baseUrl: config.baseUrl,
+		onload: () => {
+			resolveLoad?.();
+			onload?.();
+		},
+		onerror: (error) => {
+			rejectLoad?.(error);
+			onerror?.(error);
+		}
+	});
+	return { sampler, loaded };
+};
+
+interface LayeredInstrument {
+	triggerAttackRelease: (pitch: string, duration: number, time: number, velocity?: number) => void;
+	dispose: () => void;
+}
+
+let layeredInstrument: LayeredInstrument | null = null;
+let layeredInstrumentPromise: Promise<LayeredInstrument> | null = null;
 let part: Tone.Part | null = null;
 let playbackDuration = 0;
 let playbackStart = 0;
@@ -48,16 +98,79 @@ const configureContext = () => {
 	contextConfigured = true;
 };
 
+const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+
+const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
+	const { sampler: piano, loaded: pianoLoaded } = createSampler(PIANO_SAMPLER_OPTIONS);
+	const { sampler: horn, loaded: hornLoaded } = createSampler(HORN_SAMPLER_OPTIONS);
+
+	const pianoFilter = new Tone.Filter({ type: 'lowpass', frequency: 5200, rolloff: -12 });
+	const pianoGain = new Tone.Gain(0.8);
+
+	const hornColor = new Tone.Filter({ type: 'lowshelf', frequency: 220, gain: 3 });
+	const hornPresence = new Tone.Filter({ type: 'highshelf', frequency: 3800, gain: -4 });
+	const hornChorus = new Tone.Chorus({ frequency: 0.25, delayTime: 4.2, depth: 0.18, wet: 0.1 }).start();
+	const hornGain = new Tone.Gain(0.7);
+
+	const mix = new Tone.Gain(0.95);
+	const compressor = new Tone.Compressor({ threshold: -24, ratio: 2.1, attack: 0.008, release: 0.24 });
+	const masterGain = new Tone.Gain(0.88);
+	const reverbSend = new Tone.Gain(0.28);
+	const reverb = new Tone.Reverb({ decay: 2.6, wet: 0.24 });
+
+	piano.chain(pianoFilter, pianoGain, mix);
+	horn.chain(hornColor, hornPresence, hornChorus, hornGain, mix);
+
+	mix.chain(compressor, masterGain, Tone.Destination);
+	mix.connect(reverbSend);
+	reverbSend.connect(reverb);
+	reverb.connect(Tone.Destination);
+
+	await Promise.all([pianoLoaded, hornLoaded, reverb.generate()]);
+
+	return {
+		triggerAttackRelease: (pitch, duration, time, velocity = 0.85) => {
+			const vel = clamp(velocity);
+			const midi = Tone.Frequency(pitch).toMidi();
+			piano.triggerAttackRelease(pitch, duration, time, Math.min(1, vel * 0.9));
+
+			const hornWeight = clamp(1 - Math.max(0, midi - 67) / 20); // fade horn above ~D5
+			if (hornWeight > 0.05) {
+				const hornDuration = duration + 0.18;
+				horn.triggerAttackRelease(pitch, hornDuration, time, clamp(vel * hornWeight));
+			}
+		},
+		dispose: () => {
+			piano.dispose();
+			horn.dispose();
+			pianoFilter.dispose();
+			pianoGain.dispose();
+			hornColor.dispose();
+			hornPresence.dispose();
+			hornChorus.dispose();
+			hornGain.dispose();
+			mix.dispose();
+			compressor.dispose();
+			masterGain.dispose();
+			reverbSend.dispose();
+			reverb.dispose();
+		}
+	};
+};
+
 const ensureInstrument = async () => {
-	if (!synth) {
-		reverb = new Tone.Reverb({ decay: 4.3, wet: 0.45 });
-		await reverb.generate();
-		chorus = new Tone.Chorus({ frequency: 0.8, delayTime: 4, depth: 0.7, wet: 0.35 }).start();
-		const filter = new Tone.Filter({ type: 'lowpass', frequency: 1900, rolloff: -24 });
-		synth = new Tone.PolySynth(Tone.Synth, SYNTH_OPTIONS);
-		synth.chain(filter, chorus, reverb, Tone.Destination);
+	if (layeredInstrument) return layeredInstrument;
+	if (!layeredInstrumentPromise) {
+		layeredInstrumentPromise = createLayeredInstrument()
+			.then((instance) => {
+				layeredInstrument = instance;
+				return instance;
+			})
+			.finally(() => {
+				layeredInstrumentPromise = null;
+			});
 	}
-	return synth;
+	return layeredInstrumentPromise;
 };
 
 
@@ -163,11 +276,14 @@ export const recordWav = async (state: ComposerState) => {
 	if (!events.length) return null;
 	const offlineDuration = duration + 0.5;
 	const toneBuffer = await Tone.Offline(async ({ transport }) => {
-		const synth = new Tone.PolySynth(Tone.Synth, SYNTH_OPTIONS).toDestination();
+		const instrument = await createLayeredInstrument();
 		transport.bpm.value = bpm;
 		events.forEach((event) => {
-			synth.triggerAttackRelease(event.pitch, event.duration, event.time);
+			instrument.triggerAttackRelease(event.pitch, event.duration, event.time);
 		});
+		transport.scheduleOnce(() => {
+			instrument.dispose();
+		}, offlineDuration + 0.1);
 	}, offlineDuration);
 	const audioBuffer = toneBufferToAudioBuffer(toneBuffer);
 	return audioBufferToWav(audioBuffer);

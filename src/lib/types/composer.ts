@@ -37,6 +37,10 @@ export interface PlacedNote {
 	durationTicks: number;
 	color: number;
 	pitch: string;
+	groupId?: string;
+	groupType?: 'triplet-eighth';
+	groupIndex?: number;
+	groupSize?: number;
 }
 
 export interface Motif {

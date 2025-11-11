@@ -45,5 +45,5 @@
 	<HomeScreen on:select={handleMeterSelect} meters={Object.values(METERS)} />
 	<ScalePrompt open={showScalePrompt} scales={Object.values(SCALES)} on:select={handleScaleSelect} />
 {:else}
-	<ComposerWorkspace />
+	<ComposerWorkspace on:exit={() => (stage = 'home')} />
 {/if}

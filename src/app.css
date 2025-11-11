@@ -11,6 +11,7 @@
 	--success: #2ecc71;
 	--text: #f8f9ff;
 	--muted: rgba(248, 249, 255, 0.7);
+	--dock-height: 96px;
 	font-family: 'Inter', 'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	background-color: #050816;
 }
@@ -26,6 +27,7 @@ body {
 		linear-gradient(135deg, #050816 0%, #0e1129 50%, #050816 100%);
 	color: var(--text);
 	font-family: inherit;
+	overflow: hidden;
 }
 
 a {
@@ -40,9 +42,13 @@ textarea {
 }
 
 .main-shell {
-	max-width: 1200px;
+	min-height: 100vh;
+	height: 100vh;
 	margin: 0 auto;
-	padding: min(5vw, 3rem);
+	padding: min(4vw, 2rem);
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
 }
 
 .glass-panel {

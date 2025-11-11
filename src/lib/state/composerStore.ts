@@ -149,6 +149,53 @@ export const createComposerStore = () => {
 				return { ok: false, reason: 'Not allowed in this meter' };
 			}
 
+			const rows = SCALES[current.scaleId].rows;
+			const pitch = rows[candidate.rowIndex];
+			if (!pitch) {
+				return { ok: false, reason: 'Row unavailable in scale' };
+			}
+
+			// Special handling for triplet placements: expand into three linked notes.
+			if (definition.id === 'triplet-eighth') {
+				const offsets = [0, definition.durationTicks, definition.durationTicks * 2];
+				for (const offset of offsets) {
+					const validation = validatePlacement({
+						meter: current.meter,
+						notes: current.notes,
+						candidate: {
+							rowIndex: candidate.rowIndex,
+							startTick: candidate.startTick + offset,
+							durationTicks: definition.durationTicks
+						}
+					});
+					if (!validation.ok) return validation;
+				}
+
+				const groupId = crypto.randomUUID();
+				const tripletNotes = offsets.map((offset, index) => ({
+					id: crypto.randomUUID(),
+					noteDefinitionId: definition.id,
+					rowIndex: candidate.rowIndex,
+					startTick: candidate.startTick + offset,
+					durationTicks: definition.durationTicks,
+					color: definition.color,
+					pitch,
+					groupId,
+					groupType: 'triplet-eighth' as const,
+					groupIndex: index,
+					groupSize: offsets.length
+				}));
+
+				setAndPersist(
+					touch({
+						...current,
+						notes: [...current.notes, ...tripletNotes]
+					})
+				);
+
+				return { ok: true, noteId: tripletNotes[0].id };
+			}
+
 			const validation = validatePlacement({
 				meter: current.meter,
 				notes: current.notes,
@@ -156,12 +203,6 @@ export const createComposerStore = () => {
 			});
 
 			if (!validation.ok) return validation;
-
-			const rows = SCALES[current.scaleId].rows;
-			const pitch = rows[candidate.rowIndex];
-			if (!pitch) {
-				return { ok: false, reason: 'Row unavailable in scale' };
-			}
 
 			const noteId = crypto.randomUUID();
 			const newNote = {
@@ -217,10 +258,56 @@ export const createComposerStore = () => {
 			setAndPersist(touch({ ...current, notes: updatedNotes }));
 			return { ok: true, noteId };
 		},
+		moveTripletGroup: (groupId: string, newStartTick: number): PlacementActionResult => {
+			const current = get(store);
+			const groupNotes = current.notes.filter((note) => note.groupId === groupId);
+			if (!groupNotes.length) return { ok: false, reason: 'Missing triplet' };
+
+			const sorted = [...groupNotes].sort(
+				(a, b) => (a.groupIndex ?? 0) - (b.groupIndex ?? 0)
+			);
+			const firstNote = sorted[0];
+			const delta = newStartTick - firstNote.startTick;
+
+			for (const note of sorted) {
+				const validation = validatePlacement({
+					meter: current.meter,
+					notes: current.notes,
+					candidate: {
+						rowIndex: note.rowIndex,
+						startTick: note.startTick + delta,
+						durationTicks: note.durationTicks
+					},
+					ignoreNoteId: note.id
+				});
+				if (!validation.ok) return validation;
+			}
+
+			const updated = current.notes.map((note) =>
+				note.groupId === groupId
+					? {
+							...note,
+							startTick: note.startTick + delta
+					  }
+					: note
+			);
+
+			setAndPersist(touch({ ...current, notes: updated }));
+			return { ok: true };
+		},
 		removeNote: (noteId: string) => {
 			const current = get(store);
 			setAndPersist(
 				touch({ ...current, notes: current.notes.filter((note) => note.id !== noteId) })
+			);
+		},
+		removeTripletGroup: (groupId: string) => {
+			const current = get(store);
+			setAndPersist(
+				touch({
+					...current,
+					notes: current.notes.filter((note) => note.groupId !== groupId)
+				})
 			);
 		},
 		createMotifFromNotes: (noteIds: string[], name: string): Motif | null => {
