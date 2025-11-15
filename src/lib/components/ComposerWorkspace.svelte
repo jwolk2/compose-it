@@ -54,11 +54,11 @@ import { onDestroy, onMount, createEventDispatcher } from 'svelte';
 	let tempoOption = TEMPOS[1];
 	$: tempoOption = TEMPOS.find((entry) => entry.id === composer?.tempo) ?? TEMPOS[1];
 
-	let exportOptions = {
-		grid: true,
-		audio: true,
-		json: true
-	};
+let exportOptions = {
+	grid: true,
+	audio: true,
+	json: true
+};
 
 	const dispatch = createEventDispatcher<{ exit: void }>();
 
@@ -87,6 +87,8 @@ let noteSelectionPayload: { definitionId: string; durationTicks: number; color: 
 			color: defaultDefinition.color
 	  }
 	: null;
+let selectedNoteIds: string[] = [];
+let multiSelectEnabled = false;
 
 const NOTE_DRAG_TYPE = 'application/x-compose-note';
 const MOTIF_DRAG_TYPE = 'application/x-compose-motif';
@@ -99,13 +101,6 @@ type ActiveSidebarDrag = {
 	request: SidebarDropRequest;
 	dragImageEl?: HTMLElement;
 };
-
-const beatsLabel = (beats: number) => {
-		if (Number.isInteger(beats)) {
-			return `${beats} beat${beats === 1 ? '' : 's'}`;
-		}
-		return `${parseFloat(beats.toFixed(2)).toString()} beats`;
-	};
 
 const getLocalNoteIcon = (id: string) => `/icons/notes/${id}.png`;
 
@@ -197,13 +192,48 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 	const handleMotifSelection = (event: CustomEvent<{ noteIds: string[] }>) => {
 		const defaultName = `Motif ${composer.motifs.length + 1}`;
 		const name = window.prompt('Name motif', defaultName);
-	if (!name) return;
-	const motif = composerStore.createMotifFromNotes(event.detail.noteIds, name.trim());
-	if (motif) {
-		statusMessage = `Motif "${motif.name}" saved`;
-		motifMode = false;
-	}
-};
+		if (!name) return;
+		const motif = composerStore.createMotifFromNotes(event.detail.noteIds, name.trim());
+		if (motif) {
+			statusMessage = `Motif "${motif.name}" saved`;
+			motifMode = false;
+		}
+	};
+
+	const includeTripletGroups = (noteIds: string[]) => {
+		if (!composer?.notes.length) return noteIds;
+		const set = new Set(noteIds);
+		composer.notes.forEach((note) => {
+			if (set.has(note.id) && note.groupType === 'triplet-eighth' && note.groupId) {
+				composer.notes
+					.filter((entry) => entry.groupId === note.groupId)
+					.forEach((entry) => set.add(entry.id));
+			}
+		});
+		return Array.from(set);
+	};
+
+	const handleNoteSelection = (event: CustomEvent<{ noteIds: string[] }>) => {
+		selectedNoteIds = includeTripletGroups(event.detail.noteIds);
+		selectedNoteId = null;
+		selectedMotifId = null;
+	};
+
+	const handleSelectionMove = (event: CustomEvent<{ noteIds: string[]; tickDelta: number; rowDelta: number }>) => {
+		const result = composerStore.moveNotesGroup(event.detail.noteIds, event.detail.tickDelta, event.detail.rowDelta);
+		handlePlacementResult(result);
+	};
+
+	const clearSelection = () => {
+		selectedNoteIds = [];
+	};
+
+	const deleteSelectedNotes = () => {
+		if (!selectedNoteIds.length) return;
+		composerStore.removeNotes(selectedNoteIds);
+		selectedNoteIds = [];
+		statusMessage = 'Selection deleted';
+	};
 
 	const handleReady = (event: CustomEvent<{ capture: () => string | null }>) => {
 		gridApi = event.detail;
@@ -232,6 +262,10 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 
 	const handleNoteOptionSelect = (definitionId: string) => {
 		selectedMotifId = null;
+		if (multiSelectEnabled) {
+			multiSelectEnabled = false;
+			selectedNoteIds = [];
+		}
 		selectedNoteId = selectedNoteId === definitionId ? null : definitionId;
 	};
 
@@ -298,6 +332,7 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 
 let gridCanvasRef: any = null;
 let activeSidebarDrag: ActiveSidebarDrag | null = null;
+let pausedAtSeconds = 0;
 
 	const dragContainsSupportedType = (event?: DragEvent) => {
 		if (activeSidebarDrag) return true;
@@ -343,11 +378,26 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 		activeSidebarDrag = null;
 	};
 
+	const pausePlayback = async () => {
+		if (!audioPlayer) return;
+		pausedAtSeconds = playheadSeconds;
+		await audioPlayer.stop();
+		progressLoop.stop();
+		isPlaying = false;
+	};
+
 	const handlePlay = async () => {
 		if (!audioPlayer || !composer.notes.length) return;
-		await handleRestart();
-		const { duration, started } = await audioPlayer.play(composer);
-		if (!duration) return;
+		if (isPlaying) {
+			await pausePlayback();
+			return;
+		}
+		const startOffset = Math.max(0, pausedAtSeconds);
+		const { duration, started } = await audioPlayer.play(composer, startOffset);
+		if (!duration) {
+			pausedAtSeconds = 0;
+			return;
+		}
 		isPlaying = true;
 		await progressLoop.start({
 			started,
@@ -358,6 +408,7 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 				if (snapshot.ratio >= 0.999) {
 					isPlaying = false;
 					playheadSeconds = 0;
+					pausedAtSeconds = 0;
 					audioPlayer?.stop();
 					progressLoop.stop();
 				}
@@ -371,6 +422,7 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 		progressLoop.stop();
 		isPlaying = false;
 		playheadSeconds = 0;
+		pausedAtSeconds = 0;
 	};
 
 	const handleClear = async () => {
@@ -433,10 +485,10 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 		requestingName = composer.compositionName.trim() || 'composition';
 		nameError = '';
 		errorMessage = '';
-		if (mode === 'save') {
+	if (mode === 'save') {
 			exportOptions = { grid: false, audio: false, json: true };
 		} else {
-			exportOptions = { grid: true, audio: false, json: true };
+			exportOptions = { grid: true, audio: false, json: false };
 		}
 		isSaveDialogOpen = true;
 	};
@@ -477,13 +529,22 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 <section class="composer-shell">
 	<aside class:collapsed={sidebarCollapsed} class="sidebar glass-panel">
 	<div class="sidebar__toggle">
-		<button type="button" aria-label={sidebarCollapsed ? 'Expand tool sidebar' : 'Collapse tool sidebar'} on:click={toggleSidebar}>
-			{sidebarCollapsed ? '⮞' : '⮜'}
+		<button
+			type="button"
+			class:collapsed={sidebarCollapsed}
+			aria-label={sidebarCollapsed ? 'Expand tool sidebar' : 'Collapse tool sidebar'}
+			aria-expanded={!sidebarCollapsed}
+			on:click={toggleSidebar}>
+			<span class="sidebar__toggle-icon" aria-hidden="true">
+				<span></span>
+				<span></span>
+				<span></span>
+			</span>
 		</button>
 		{#if !sidebarCollapsed}
 				<div>
 					<h4>Palette & motifs</h4>
-					<p>Pick a block, then click the grid.</p>
+					<p>Pick a block, build your composition.</p>
 				</div>
 			{/if}
 		</div>
@@ -501,7 +562,7 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 								on:dragstart={(event) => handleNoteDragStart(option, event)}
 								on:dragend={handleSidebarDragEnd}
 								class="note-card"
-								class:active={selectedNoteId === option.id}
+								class:active={!multiSelectEnabled && selectedNoteId === option.id}
 								disabled={isNoteDisabled(option)}
 								on:click={() => handleNoteOptionSelect(option.id)}>
 								<span class="note-glyph" aria-hidden="true">
@@ -518,7 +579,6 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 								</span>
 								<div>
 									<strong>{option.label}</strong>
-									<small>{beatsLabel(option.durationBeats)}</small>
 								</div>
 							</button>
 						{/each}
@@ -563,9 +623,66 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 				</section>
 
 				<section class="sidebar-actions">
-					<button type="button" on:click={() => backgroundInput?.click()}>🖼 Set background</button>
-					<button type="button" on:click={() => jsonInput?.click()}>📁 Load JSON</button>
+					<button
+						type="button"
+						class="icon-button"
+						class:active={multiSelectEnabled}
+						on:click={() => {
+							multiSelectEnabled = !multiSelectEnabled;
+							if (!multiSelectEnabled) clearSelection();
+						}}>
+						<span class="icon" aria-hidden="true">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+								<rect x="5" y="5" width="6" height="6" rx="1.5" />
+								<rect x="13" y="5" width="6" height="6" rx="1.5" />
+								<rect x="5" y="13" width="6" height="6" rx="1.5" />
+								<path d="M13 16h6M16 13v6" />
+							</svg>
+						</span>
+						<span>{multiSelectEnabled ? 'Disable multi-select' : 'Enable multi-select'}</span>
+					</button>
+					<button type="button" class="icon-button" on:click={() => backgroundInput?.click()}>
+						<span class="icon" aria-hidden="true">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+								<rect x="3.75" y="5.25" width="16.5" height="13.5" rx="2.25" />
+								<circle cx="10" cy="10" r="1.8" />
+								<path d="M5.5 16l3.5-3.5 3 3 3.5-4.5L18.5 16" />
+							</svg>
+						</span>
+						<span>Set background</span>
+					</button>
+					{#if composer.backgroundImage}
+						<button type="button" class="icon-button" on:click={() => composerStore.setBackgroundImage(undefined)}>
+							<span class="icon" aria-hidden="true">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M5 5l14 14" />
+									<path d="M19 5L5 19" />
+								</svg>
+							</span>
+							<span>Clear background</span>
+						</button>
+					{/if}
+					<button type="button" class="icon-button" on:click={() => jsonInput?.click()}>
+						<span class="icon" aria-hidden="true">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M12 4.5v10" />
+								<path d="M8.5 10.5l3.5 3.5 3.5-3.5" />
+								<path d="M5 19.5h14" />
+							</svg>
+						</span>
+						<span>Load JSON</span>
+					</button>
 					<span class="autosave">Autosaved {lastSaved()}</span>
+					{#if selectedNoteIds.length}
+						<div class="selection-panel">
+							<div>
+								<strong>{selectedNoteIds.length} selected</strong>
+							</div>
+							<div class="selection-panel__actions">
+								<button type="button" on:click={deleteSelectedNotes}>Delete</button>
+							</div>
+						</div>
+					{/if}
 					<input bind:this={backgroundInput} type="file" accept="image/jpeg,image/png" on:change={handleBackgroundFile} hidden />
 					<input bind:this={jsonInput} type="file" accept="application/json" on:change={handleJsonUpload} hidden />
 				</section>
@@ -607,6 +724,8 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 				bpm={tempoOption.bpm}
 				selectedNoteDefinition={noteSelectionPayload}
 				selectedMotifId={selectedMotifId}
+				selectedNoteIds={selectedNoteIds}
+				multiSelectEnabled={multiSelectEnabled}
 				on:place={handlePlace}
 				on:move={handleMove}
 				on:delete={handleDelete}
@@ -615,6 +734,8 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 				on:deleteTripletGroup={handleTripletGroupDelete}
 				on:placeMotif={handlePlaceMotif}
 				on:motifSelection={handleMotifSelection}
+				on:noteSelection={handleNoteSelection}
+				on:moveSelection={handleSelectionMove}
 				on:ready={handleReady}
 			/>
 		</div>
@@ -623,23 +744,77 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 
 <footer class="control-dock glass-panel">
 	<div class="dock-group">
-		<button class="primary" on:click={handlePlay} disabled={!composer.notes.length}>
-			{isPlaying ? '⏸ Pause' : '▶️ Play'}
+		<button class="primary icon-button" on:click={handlePlay} disabled={!composer.notes.length}>
+			<span class="icon" aria-hidden="true">
+				{#if isPlaying}
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+						<line x1="9" y1="7" x2="9" y2="17" />
+						<line x1="15" y1="7" x2="15" y2="17" />
+					</svg>
+				{:else}
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+						<path d="M9 7l8 5-8 5z" />
+					</svg>
+				{/if}
+			</span>
+			<span>{isPlaying ? 'Pause' : 'Play'}</span>
 		</button>
-		<button on:click={handleRestart}>🔁 Restart</button>
-		<button on:click={handleClear}>🧹 Clear</button>
+		<button class="icon-button" on:click={handleRestart}>
+			<span class="icon" aria-hidden="true">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M9.5 5.5L5.5 9l4 3.5" />
+					<path d="M7 9h7a5 5 0 1 1-4.4 7.4" />
+				</svg>
+			</span>
+			<span>Restart</span>
+		</button>
+		<button class="icon-button" on:click={handleClear}>
+			<span class="icon" aria-hidden="true">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M6.5 8.5h11" />
+					<path d="M9 8.5l.8 10h4.4l.8-10" />
+					<path d="M10 5.5h4" />
+					<path d="M8 5.5l1-1.5h6l1 1.5" />
+				</svg>
+			</span>
+			<span>Clear</span>
+		</button>
 	</div>
 	<div class="dock-group">
-		<label class="tempo">
-			<span>⏱ Tempo</span>
+		<label class="tempo icon-button">
+			<span class="icon" aria-hidden="true">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M10 4.5l-4 15h12l-3.5-12" />
+					<path d="M10.5 11l6-4" />
+				</svg>
+			</span>
+			<span>Tempo</span>
 			<select value={composer.tempo} on:change={handleTempoChange}>
 				{#each TEMPOS as tempo}
 					<option value={tempo.id}>{tempo.label}</option>
 				{/each}
 			</select>
 		</label>
-		<button on:click={() => openDialog('save')}>💾 Save</button>
-		<button on:click={() => openDialog('export')}>📤 Export</button>
+		<button class="icon-button" on:click={() => openDialog('save')}>
+			<span class="icon" aria-hidden="true">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M7 7h10" />
+					<path d="M12 3.5v7.5" />
+					<path d="M6 12h12v8H6z" />
+				</svg>
+			</span>
+			<span>Save</span>
+		</button>
+		<button class="icon-button" on:click={() => openDialog('export')}>
+			<span class="icon" aria-hidden="true">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M12 13.5V4.5" />
+					<path d="M15.5 7.5L12 4 8.5 7.5" />
+					<path d="M5 13.5v6h14v-6" />
+				</svg>
+			</span>
+			<span>Export</span>
+		</button>
 	</div>
 </footer>
 
@@ -650,16 +825,21 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 				<h3>Save Composition</h3>
 				<p>Would you like to save your composition <strong>{composer.compositionName || 'composition'}</strong>?</p>
 			{:else}
-				<h3>Export your sequence</h3>
+				<h3>Export</h3>
 				<p>Choose which assets to export.</p>
 				<p class="note">Using file name <strong>{composer.compositionName || 'composition'}</strong>.</p>
-				<label><input type="checkbox" bind:checked={exportOptions.grid} /> Grid PDF</label>
-				<label><input type="checkbox" bind:checked={exportOptions.audio} /> WAV audio render</label>
-				<label><input type="checkbox" bind:checked={exportOptions.json} /> JSON project file</label>
+				<label><input type="checkbox" bind:checked={exportOptions.grid} /> Grid (PDF)</label>
+				<label><input type="checkbox" bind:checked={exportOptions.audio} /> Sound (WAV)</label>
 			{/if}
 			<div class="dialog-actions">
-				<button class="primary" type="submit" disabled={exporting}>{exporting ? 'Downloading…' : 'Download'}</button>
-				<button class="ghost" type="button" on:click={() => (isSaveDialogOpen = false)}>Cancel</button>
+				<button class="primary" type="submit" disabled={exporting}>
+					{#if exporting}
+						{dialogMode === 'export' ? 'Exporting…' : 'Downloading…'}
+					{:else}
+						{dialogMode === 'export' ? 'Export' : 'Download'}
+					{/if}
+				</button>
+				<button class="secondary" type="button" on:click={() => (isSaveDialogOpen = false)}>Cancel</button>
 			</div>
 		</form>
 	</div>
@@ -711,6 +891,31 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 		color: inherit;
 		padding: 0.25rem;
 		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+	}
+
+	.sidebar__toggle-icon {
+		display: inline-flex;
+		flex-direction: column;
+		gap: 4px;
+		width: 20px;
+	}
+
+	.sidebar__toggle-icon span {
+		display: block;
+		height: 2px;
+		width: 100%;
+		background: currentColor;
+		border-radius: 999px;
+		transition: transform 0.2s ease;
+	}
+
+	.sidebar__toggle button:not(.collapsed) .sidebar__toggle-icon span:nth-child(2) {
+		transform: translateX(4px);
 	}
 
 	.sidebar__toggle h4 {
@@ -728,8 +933,9 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 		flex-direction: column;
 		gap: 1rem;
 		overflow-y: auto;
-		padding: 0.5rem 0.5rem 0 0.5rem;
+		padding: 0.5rem 0.5rem calc(var(--dock-height) + 0.5rem) 0.5rem;
 		scrollbar-width: thin;
+		max-height: calc(100% - var(--dock-height) - 80px);
 		max-height: calc(100vh - var(--dock-height) - 80px);
 		position: relative;
 	}
@@ -798,12 +1004,16 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		padding: 4px;
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.08);
 	}
 
 	.note-glyph img {
 		width: 100%;
 		height: 100%;
 		object-fit: contain;
+		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 	}
 
 	:global(.note-glyph.missing)::after {
@@ -815,6 +1025,7 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 	.motif-actions {
 		display: flex;
 		justify-content: flex-start;
+		margin-bottom: 0.5rem;
 	}
 
 	.motif-section button {
@@ -887,9 +1098,50 @@ let activeSidebarDrag: ActiveSidebarDrag | null = null;
 		border: 1px solid rgba(255, 255, 255, 0.12);
 		background: rgba(255, 255, 255, 0.04);
 		color: inherit;
-		padding: 0.5rem 0.75rem;
+		padding: 0.5rem 0.85rem;
 		cursor: pointer;
 		text-align: left;
+	}
+
+	.sidebar-actions button.active {
+		border-color: var(--accent);
+		background: rgba(255, 209, 102, 0.1);
+	}
+
+	.selection-panel {
+		border: 1px dashed rgba(255, 255, 255, 0.2);
+		border-radius: 12px;
+		padding: 0.65rem 0.85rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.selection-panel__actions {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.icon-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 18px;
+		height: 18px;
+		flex-shrink: 0;
+		color: inherit;
+	}
+
+	.icon svg {
+		width: 100%;
+		height: 100%;
 	}
 
 	.autosave {

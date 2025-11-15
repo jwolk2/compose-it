@@ -8,13 +8,17 @@ import {
 	Text,
 	type FederatedPointerEvent
 } from 'pixi.js';
-import { METERS, SCALES } from '$lib/constants/music';
+import { METERS, NOTE_PALETTE, SCALES } from '$lib/constants/music';
 	import { TICKS_PER_BEAT, type MeterId, type Motif, type PlacedNote, type ScaleId } from '$lib/types/composer';
 	import { isNoteActive } from '$lib/utils/highlight';
 
-	const BASE_CELL_HEIGHT = 32;
-	const GRID_PADDING = 16;
-	const LEFT_GUTTER = 90;
+const BASE_CELL_HEIGHT = 32;
+const GRID_PADDING = 16;
+const LEFT_GUTTER = 90;
+const SIXTEENTHS_PER_BEAT = 4;
+const SIXTEENTH_TICK_SIZE = TICKS_PER_BEAT / SIXTEENTHS_PER_BEAT || 1;
+const NOTE_VERTICAL_PADDING = 2;
+const definitionLookup = new Map(NOTE_PALETTE.map((definition) => [definition.id, definition]));
 
 	let cellHeight = BASE_CELL_HEIGHT;
 
@@ -34,16 +38,32 @@ type ActiveDrag = {
 	lockX?: boolean;
 	baseStartTick?: number;
 	groupMode?: 'single' | 'group';
+	limitToBeat?: boolean;
+	beatSpanTicks?: number;
+	selectionNotes?: Array<{
+		id: string;
+		tickOffset: number;
+		rowOffset: number;
+		durationTicks: number;
+		color: number;
+		groupId?: string | null;
+		groupType?: string | null;
+	}>;
+	selectionBase?: { startTick: number; rowIndex: number };
+	selectionNoteIds?: Set<string>;
+	selectionDelta?: { tickDelta: number; rowDelta: number } | null;
 };
 
 	export let notes: PlacedNote[] = [];
 	export let meter: MeterId = '4/4';
 	export let scale: ScaleId = 'c-major';
-	export let motifs: Motif[] = [];
-	export let motifMode = false;
-	export let selectedNoteDefinition: { definitionId: string; durationTicks: number; color: number } | null = null;
-	export let selectedMotifId: string | null = null;
-	export let backgroundImage: string | undefined;
+export let motifs: Motif[] = [];
+export let motifMode = false;
+export let selectedNoteDefinition: { definitionId: string; durationTicks: number; color: number } | null = null;
+export let selectedMotifId: string | null = null;
+export let selectedNoteIds: string[] = [];
+export let multiSelectEnabled = false;
+export let backgroundImage: string | undefined;
 export let playheadSeconds = 0;
 export let bpm = 80;
 
@@ -56,11 +76,16 @@ const dispatch = createEventDispatcher<{
 	deleteTripletGroup: { groupId: string };
 	placeMotif: { motifId: string; startTick: number; rowIndex: number };
 	motifSelection: { noteIds: string[] };
+	noteSelection: { noteIds: string[] };
+	moveSelection: { noteIds: string[]; tickDelta: number; rowDelta: number };
 	ready: { capture: () => string | null };
 }>();
 
+let selectedNoteSet = new Set<string>();
+
 	$: gridShellStyle = backgroundImage ? `--grid-bg: url(${backgroundImage});` : '';
 	$: hasBackground = Boolean(backgroundImage);
+$: selectedNoteSet = new Set(selectedNoteIds);
 
 let host: HTMLDivElement;
 let canvas: HTMLCanvasElement;
@@ -71,7 +96,8 @@ let labelLayer: Container;
 let noteLayer: Container;
 let highlightLayer: Container;
 let highlightBox: Graphics;
-let selectionGraphic: Graphics;
+let selectionOutline: Graphics;
+let selectionFill: Graphics;
 
 	let gridWidth = 0;
 	let gridHeight = 0;
@@ -84,6 +110,7 @@ let selectionGraphic: Graphics;
 
 	let activeDrag: ActiveDrag | null = null;
 let selectionStart: { x: number; y: number } | null = null;
+let selectionContext: 'motif' | 'multi' | null = null;
 const noteRects = new Map<string, { x: number; y: number; width: number; height: number }>();
 
 const lightenColor = (color: number, factor = 0.35) => {
@@ -94,6 +121,18 @@ const lightenColor = (color: number, factor = 0.35) => {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const quantizeTick = (tick: number) => {
+	const step = SIXTEENTH_TICK_SIZE > 0 ? SIXTEENTH_TICK_SIZE : 1;
+	return Math.round(tick / step) * step;
+};
+const withinSingleBeat = (startTick: number, spanTicks: number) => {
+	if (spanTicks <= 0) return true;
+	const beat = TICKS_PER_BEAT;
+	const endTick = startTick + spanTicks - 1;
+	return Math.floor(startTick / beat) === Math.floor(endTick / beat);
+};
+const noteBlockHeight = (rowSpan = 1) => Math.max(6, rowSpan * cellHeight - NOTE_VERTICAL_PADDING * 2);
+const noteBlockY = (rowIndex: number) => rowToY(rowIndex) + NOTE_VERTICAL_PADDING;
 
 	onMount(async () => {
 		canvas = document.createElement('canvas');
@@ -115,11 +154,13 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		noteLayer = new Container();
 		highlightLayer = new Container();
 		highlightBox = new Graphics();
-		selectionGraphic = new Graphics();
-		selectionGraphic.visible = false;
+		selectionFill = new Graphics();
+		selectionOutline = new Graphics();
+		selectionFill.visible = false;
+		selectionOutline.visible = false;
 
 		app.stage.addChild(gridLayer, labelLayer, noteLayer, highlightLayer);
-		highlightLayer.addChild(highlightBox, selectionGraphic);
+		highlightLayer.addChild(highlightBox, selectionFill, selectionOutline);
 
 		app.stage.eventMode = 'static';
 		app.stage.hitArea = app.screen;
@@ -197,6 +238,19 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 				.stroke({ color: isBarline ? 0xffffff : 0x2b3c5c, width: isBarline ? 2 : 1, alpha: isBarline ? 0.9 : 0.5 });
 			gridLayer.addChild(line);
 		}
+
+		if (Number.isInteger(SIXTEENTH_TICK_SIZE)) {
+			for (let tick = SIXTEENTH_TICK_SIZE; tick < totalTicks; tick += SIXTEENTH_TICK_SIZE) {
+				if (tick % TICKS_PER_BEAT === 0) continue;
+				const x = gridOriginX + (tick / totalTicks) * gridWidth;
+				const line = new Graphics();
+				line
+					.moveTo(x, gridOriginY)
+					.lineTo(x, gridOriginY + gridHeight)
+					.stroke({ color: 0x1c253d, width: 1, alpha: 0.35 });
+				gridLayer.addChild(line);
+			}
+		}
 	};
 
 	const renderLabels = () => {
@@ -215,22 +269,38 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		const progressSeconds = playheadSeconds;
 		notes.forEach((note) => {
 			const width = note.durationTicks * pxPerTick;
-			const height = cellHeight - 4;
+			const height = noteBlockHeight();
 			const x = tickToX(note.startTick);
-			const y = rowToY(note.rowIndex);
+			const y = noteBlockY(note.rowIndex);
 			noteRects.set(note.id, { x, y, width, height });
 			const graphic = new Graphics();
 			const active = playheadSeconds > 0 && isNoteActive(note, progressSeconds, bpm);
-			const fillColor = active ? lightenColor(note.color) : note.color;
+			const isSelected = selectedNoteSet.has(note.id);
+			const fillColor = active
+				? lightenColor(note.color)
+				: isSelected
+					? lightenColor(note.color, 0.4)
+					: note.color;
+			const strokeColor = active ? 0xffffff : isSelected ? 0xffd166 : 0x000000;
+			const strokeWidth = active || isSelected ? 2 : 0;
 			graphic
 				.roundRect(x, y, width, height, 6)
 				.fill(fillColor)
-				.stroke({ color: active ? 0xffffff : 0x000000, width: active ? 2 : 0, alpha: active ? 0.9 : 0 });
-			graphic.alpha = active ? 1 : 0.9;
+				.stroke({ color: strokeColor, width: strokeWidth, alpha: strokeWidth ? 0.9 : 0 });
+			graphic.alpha = active || isSelected ? 1 : 0.9;
 			graphic.cursor = motifMode ? 'crosshair' : 'pointer';
 			graphic.eventMode = motifMode ? 'none' : 'static';
 			graphic.on('pointerdown', (event: FederatedPointerEvent) => {
+				if (motifMode) return;
 				event.stopPropagation();
+				if (multiSelectEnabled) {
+					if (selectedNoteSet.has(note.id)) {
+						startExistingNoteDrag(note, graphic, event);
+					} else {
+						beginAreaSelection('multi', event);
+					}
+					return;
+				}
 				startExistingNoteDrag(note, graphic, event);
 			});
 			graphic.on('rightdown', () => {
@@ -244,15 +314,17 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		});
 	};
 
-	const beginNotePlacement = (
+const beginNotePlacement = (
 		selection: { definitionId: string; durationTicks: number; color: number },
 		event: FederatedPointerEvent
 	) => {
-		if (motifMode) return;
+		if (motifMode || multiSelectEnabled) return;
 		clearExternalPreview();
 		const ghost = new Graphics();
-		ghost.roundRect(0, 0, selection.durationTicks * pxPerTick, cellHeight - 4, 6).fill(selection.color, 0.65);
+		ghost.roundRect(0, 0, selection.durationTicks * pxPerTick, noteBlockHeight(), 6).fill(selection.color, 0.65);
 		highlightLayer.addChild(ghost);
+		const definition = definitionLookup.get(selection.definitionId);
+		const isTriplet = definition?.id === 'triplet-eighth';
 		activeDrag = {
 			source: 'palette-note',
 			definitionId: selection.definitionId,
@@ -260,16 +332,63 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 			rowSpan: 1,
 			offsetX: ghost.width / 2,
 			offsetY: ghost.height / 2,
-			ghost
+			ghost,
+			limitToBeat: Boolean(isTriplet),
+			beatSpanTicks: isTriplet ? TICKS_PER_BEAT : selection.durationTicks
 		};
 		updateGhostPosition(event.global.x, event.global.y);
+	};
+
+	const beginSelectionDrag = (anchor: PlacedNote, event: FederatedPointerEvent) => {
+		const selectionNotes = notes.filter((entry) => selectedNoteSet.has(entry.id));
+		if (selectionNotes.length < 2) return false;
+		const ghost = new Graphics();
+		const baseStartTick = anchor.startTick;
+		const baseRowIndex = anchor.rowIndex;
+		selectionNotes.forEach((entry) => {
+			const relX = (entry.startTick - baseStartTick) * pxPerTick;
+			const relY = (entry.rowIndex - baseRowIndex) * cellHeight;
+			ghost
+				.roundRect(relX, relY, entry.durationTicks * pxPerTick, noteBlockHeight(), 6)
+				.fill(entry.color, 0.35)
+				.stroke({ color: 0xffffff, width: 1, alpha: 0.4 });
+		});
+		highlightLayer.addChild(ghost);
+		activeDrag = {
+			source: 'existing-note',
+			noteId: anchor.id,
+			definitionId: anchor.noteDefinitionId,
+			durationTicks: anchor.durationTicks,
+			rowSpan: 1,
+			offsetX: event.global.x - tickToX(anchor.startTick),
+			offsetY: event.global.y - noteBlockY(anchor.rowIndex),
+			ghost,
+			selectionNotes: selectionNotes.map((entry) => ({
+				id: entry.id,
+				tickOffset: entry.startTick - baseStartTick,
+				rowOffset: entry.rowIndex - baseRowIndex,
+				durationTicks: entry.durationTicks,
+				color: entry.color,
+				groupId: entry.groupId,
+				groupType: entry.groupType
+			})),
+			selectionBase: { startTick: baseStartTick, rowIndex: baseRowIndex },
+			selectionNoteIds: new Set(selectionNotes.map((entry) => entry.id))
+		};
+		updateGhostPosition(event.global.x, event.global.y);
+		return true;
 	};
 
 	const startExistingNoteDrag = (note: PlacedNote, graphic: Graphics, event: FederatedPointerEvent) => {
 		if (motifMode) return;
 		clearExternalPreview();
+		if (multiSelectEnabled && selectedNoteSet.has(note.id) && selectedNoteSet.size > 1) {
+			if (beginSelectionDrag(note, event)) return;
+		}
 		const ghost = new Graphics();
 		const isTriplet = note.groupType === 'triplet-eighth' && Boolean(note.groupId);
+		const definition = definitionLookup.get(note.noteDefinitionId);
+		const definitionLimit = definition?.id === 'triplet-eighth';
 		const relatedNotes =
 			isTriplet && note.groupId ? notes.filter((entry) => entry.groupId === note.groupId) : [];
 		const groupStart = relatedNotes.length
@@ -281,7 +400,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		const groupDuration = groupEnd - groupStart;
 
 		if (isTriplet && event.shiftKey && note.groupId) {
-			ghost.roundRect(0, 0, groupDuration * pxPerTick, cellHeight - 4, 6).fill(note.color, 0.45);
+			ghost.roundRect(0, 0, groupDuration * pxPerTick, noteBlockHeight(), 6).fill(note.color, 0.45);
 			highlightLayer.addChild(ghost);
 			activeDrag = {
 				source: 'existing-note',
@@ -290,15 +409,17 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 				durationTicks: groupDuration,
 				rowSpan: 1,
 				offsetX: event.global.x - tickToX(groupStart),
-				offsetY: event.global.y - rowToY(note.rowIndex),
+				offsetY: event.global.y - noteBlockY(note.rowIndex),
 				ghost,
-				groupMode: 'group'
+				groupMode: 'group',
+				limitToBeat: true,
+				beatSpanTicks: groupDuration
 			};
 			updateGhostPosition(event.global.x, event.global.y);
 			return;
 		}
 
-		const ghostHeight = cellHeight - 4;
+		const ghostHeight = noteBlockHeight();
 		const ghostWidth = note.durationTicks * pxPerTick;
 		ghost.roundRect(0, 0, ghostWidth, ghostHeight, 6).fill(note.color, 0.8);
 		highlightLayer.addChild(ghost);
@@ -316,7 +437,9 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 			lockX: Boolean(isTriplet),
 			baseStartTick: note.startTick,
 			groupId: note.groupId,
-			groupMode: isTriplet ? 'single' : undefined
+			groupMode: isTriplet ? 'single' : undefined,
+			limitToBeat: Boolean(definitionLimit && !isTriplet ? true : false),
+			beatSpanTicks: definitionLimit ? definition?.durationTicks ?? note.durationTicks : note.durationTicks
 		};
 		updateGhostPosition(event.global.x, event.global.y);
 	};
@@ -325,7 +448,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		if (motifMode) return;
 		clearExternalPreview();
 		const ghost = new Graphics();
-		ghost.roundRect(0, 0, motif.widthTicks * pxPerTick, motif.rowSpan * cellHeight - 4, 8).fill(0xffffff, 0.35);
+		ghost.roundRect(0, 0, motif.widthTicks * pxPerTick, noteBlockHeight(motif.rowSpan), 8).fill(0xffffff, 0.35);
 		highlightLayer.addChild(ghost);
 		activeDrag = {
 			source: 'motif',
@@ -346,6 +469,41 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 				? tickToX(activeDrag.baseStartTick)
 				: x - activeDrag.offsetX;
 		activeDrag.ghost.position.set(desiredX, y - activeDrag.offsetY);
+
+		if (activeDrag.selectionNotes && activeDrag.selectionBase && activeDrag.selectionNoteIds) {
+			const candidate = pointerToCandidate(
+				x,
+				y,
+				activeDrag.durationTicks,
+				activeDrag.rowSpan,
+				activeDrag.offsetX,
+				activeDrag.offsetY
+			);
+			if (!candidate) {
+				activeDrag.selectionDelta = null;
+				highlightBox.clear();
+				return;
+			}
+			const result = validateSelectionCandidate(candidate, activeDrag);
+			activeDrag.selectionDelta = result.valid ? { tickDelta: result.tickDelta, rowDelta: result.rowDelta } : null;
+			const color = result.valid ? 0x2ecc71 : 0xe74c3c;
+			highlightBox.clear();
+			activeDrag.selectionNotes.forEach((note) => {
+				const noteStart = candidate.startTick + note.tickOffset;
+				const noteRow = candidate.rowIndex + note.rowOffset;
+				highlightBox
+					.roundRect(
+						tickToX(noteStart),
+						noteBlockY(noteRow),
+						note.durationTicks * pxPerTick,
+						noteBlockHeight(),
+						8
+					)
+					.stroke({ color, width: 2, alpha: 0.8 });
+			});
+			return;
+		}
+
 		const candidate = pointerToCandidate(
 			x,
 			y,
@@ -368,7 +526,10 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 			activeDrag.groupMode === 'group' ? undefined : activeDrag.noteId,
 			activeDrag.groupMode === 'group' ? activeDrag.groupId : undefined
 		);
-		const valid = respectsBarlines(candidate.startTick, activeDrag.durationTicks) && !collision;
+		const beatValid =
+			!activeDrag.limitToBeat ||
+			withinSingleBeat(candidate.startTick, activeDrag.beatSpanTicks ?? activeDrag.durationTicks);
+		const valid = respectsBarlines(candidate.startTick, activeDrag.durationTicks) && !collision && beatValid;
 		showHighlight(candidate, valid, activeDrag.rowSpan, activeDrag.durationTicks);
 	};
 
@@ -383,14 +544,20 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		if (!isInsideGrid(x, y)) return null;
 		const rows = getScaleRows();
 		const noteWidth = durationTicks * pxPerTick;
-		const noteHeight = rowSpan * cellHeight;
+		const noteHeight = noteBlockHeight(rowSpan);
 		const anchorX = clamp(x - offsetX, gridOriginX, gridOriginX + gridWidth - noteWidth);
-		const anchorY = clamp(y - offsetY, gridOriginY, gridOriginY + gridHeight - noteHeight);
+		const anchorY = clamp(
+			y - offsetY,
+			gridOriginY + NOTE_VERTICAL_PADDING,
+			gridOriginY + gridHeight - NOTE_VERTICAL_PADDING - noteHeight
+		);
 		const relativeX = anchorX - gridOriginX;
 		const relativeY = anchorY - gridOriginY;
 		const rowIndex = Math.floor(relativeY / cellHeight);
 		if (rowIndex < 0 || rowIndex + rowSpan > rows.length) return null;
-		const startTick = Math.max(0, Math.min(Math.round(relativeX / pxPerTick), totalTicks - durationTicks));
+		const rawTick = Math.round(relativeX / pxPerTick);
+		const snappedTick = quantizeTick(rawTick);
+		const startTick = Math.max(0, Math.min(snappedTick, totalTicks - durationTicks));
 		return { rowIndex, startTick };
 	};
 
@@ -410,25 +577,41 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		highlightBox.clear();
 		if (!candidate) return;
 		const color = valid ? 0x2ecc71 : 0xe74c3c;
-		highlightBox.roundRect(
-			tickToX(candidate.startTick),
-			rowToY(candidate.rowIndex),
-			durationTicks * pxPerTick,
-			rowSpan * cellHeight - 4,
-			8
-		).stroke({ color, width: 2, alpha: 0.9 });
+		highlightBox
+			.roundRect(
+				tickToX(candidate.startTick),
+				noteBlockY(candidate.rowIndex),
+				durationTicks * pxPerTick,
+				noteBlockHeight(rowSpan),
+				8
+			)
+			.stroke({ color, width: 2, alpha: 0.9 });
+	};
+
+const beginAreaSelection = (mode: 'motif' | 'multi', event: FederatedPointerEvent) => {
+		selectionContext = mode;
+		selectionStart = { x: event.global.x, y: event.global.y };
+		const strokeColor = mode === 'motif' ? 0xf4d03f : 0x8ab4ff;
+		const fillColor = mode === 'motif' ? 0xf4d03f : 0x8ab4ff;
+		selectionOutline.clear();
+		selectionFill.clear();
+		selectionOutline.stroke({ color: strokeColor, width: 2 });
+		selectionFill.fill(fillColor, mode === 'motif' ? 0.08 : 0.15);
+		selectionOutline.visible = true;
+		selectionFill.visible = true;
 	};
 
 	const handlePointerDown = (event: FederatedPointerEvent) => {
 		const inside = isInsideGrid(event.global.x, event.global.y);
+		if (!inside) return;
 		if (motifMode) {
-			if (!inside) return;
-			selectionStart = { x: event.global.x, y: event.global.y };
-			selectionGraphic.clear();
-			selectionGraphic.visible = true;
+			beginAreaSelection('motif', event);
 			return;
 		}
-		if (!inside) return;
+		if (multiSelectEnabled) {
+			beginAreaSelection('multi', event);
+			return;
+		}
 		if (selectedNoteDefinition) {
 			beginNotePlacement(selectedNoteDefinition, event);
 			return;
@@ -438,6 +621,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 			if (motif) {
 				beginMotifPlacement(motif, event);
 			}
+			return;
 		}
 	};
 
@@ -463,6 +647,18 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 			activeDrag?.offsetX ?? 0,
 			activeDrag?.offsetY ?? 0
 		);
+		if (activeDrag?.selectionNotes && activeDrag.selectionNoteIds) {
+			const result = validateSelectionCandidate(candidate, activeDrag);
+			if (result.valid) {
+				dispatch('moveSelection', {
+					noteIds: Array.from(activeDrag.selectionNoteIds),
+					tickDelta: result.tickDelta,
+					rowDelta: result.rowDelta
+				});
+			}
+			cleanupDrag();
+			return;
+		}
 		if (activeDrag?.source === 'existing-note' && !candidate) {
 			if (activeDrag.groupId && (activeDrag.groupMode === 'group' || activeDrag.groupMode === 'single')) {
 				dispatch('deleteTripletGroup', { groupId: activeDrag.groupId });
@@ -513,6 +709,8 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		activeDrag?.ghost.destroy();
 		activeDrag = null;
 		highlightBox.clear();
+		selectionOutline.visible = false;
+		selectionFill.visible = false;
 	};
 
 	const deleteNoteAtPointer = (event: FederatedPointerEvent) => {
@@ -523,22 +721,35 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 
 	const updateSelectionRect = (x: number, y: number) => {
 		if (!selectionStart) return;
-		selectionGraphic.clear();
 		const rect = normalizeRect(selectionStart.x, selectionStart.y, x, y);
-		selectionGraphic.rect(rect.x, rect.y, rect.width, rect.height).stroke({ color: 0xf4d03f, width: 2 });
+		selectionOutline.clear();
+		selectionFill.clear();
+		const strokeColor = selectionContext === 'motif' ? 0xf4d03f : 0x8ab4ff;
+		const fillColor = selectionContext === 'motif' ? 0xf4d03f : 0x8ab4ff;
+		selectionOutline.rect(rect.x, rect.y, rect.width, rect.height).stroke({ color: strokeColor, width: 2 });
+		selectionFill.rect(rect.x, rect.y, rect.width, rect.height).fill(fillColor, selectionContext === 'motif' ? 0.08 : 0.15);
 	};
 
 	const finalizeSelection = (x: number, y: number) => {
 		if (!selectionStart) return;
-		selectionGraphic.clear();
-		selectionGraphic.visible = false;
+		selectionOutline.clear();
+		selectionFill.clear();
+		selectionOutline.visible = false;
+		selectionFill.visible = false;
 		const rect = normalizeRect(selectionStart.x, selectionStart.y, x, y);
 		selectionStart = null;
+		const intent = selectionContext;
+		selectionContext = null;
 		const selected: string[] = [];
 		noteRects.forEach((bounds, noteId) => {
 			if (rectsIntersect(rect, bounds)) selected.push(noteId);
 		});
-		if (selected.length) dispatch('motifSelection', { noteIds: selected });
+		if (!selected.length) return;
+		if (intent === 'motif') {
+			dispatch('motifSelection', { noteIds: selected });
+		} else if (intent === 'multi') {
+			dispatch('noteSelection', { noteIds: selected });
+		}
 	};
 
 	const normalizeRect = (x1: number, y1: number, x2: number, y2: number) => {
@@ -552,21 +763,66 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 		b: { x: number; y: number; width: number; height: number }
 	) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 
-	const rowHasCollision = (
-		rowIndex: number,
-		startTick: number,
-		durationTicks: number,
-		ignoreId?: string,
-		ignoreGroupId?: string
-	) => {
-		const candidateEnd = startTick + durationTicks;
-		return notes.some((note) => {
-			if (note.rowIndex !== rowIndex) return false;
-			if (ignoreId && note.id === ignoreId) return false;
+const rowHasCollision = (
+	rowIndex: number,
+	startTick: number,
+	durationTicks: number,
+	ignoreId?: string | Set<string>,
+	ignoreGroupId?: string
+) => {
+	const candidateEnd = startTick + durationTicks;
+	return notes.some((note) => {
+		if (note.rowIndex !== rowIndex) return false;
+			if (ignoreId) {
+				if (ignoreId instanceof Set) {
+					if (ignoreId.has(note.id)) return false;
+				} else if (note.id === ignoreId) {
+					return false;
+				}
+			}
 			if (ignoreGroupId && note.groupId && note.groupId === ignoreGroupId) return false;
 			const noteEnd = note.startTick + note.durationTicks;
 			return !(candidateEnd <= note.startTick || startTick >= noteEnd);
 		});
+	};
+
+	const validateSelectionCandidate = (
+		candidate: { rowIndex: number; startTick: number } | null,
+		drag: ActiveDrag
+	) => {
+		if (!candidate || !drag.selectionNotes || !drag.selectionBase || !drag.selectionNoteIds) {
+			return { valid: false, tickDelta: 0, rowDelta: 0 };
+		}
+		const rows = getScaleRows();
+		const rowDelta = candidate.rowIndex - drag.selectionBase.rowIndex;
+		const tickDelta = candidate.startTick - drag.selectionBase.startTick;
+		const tripletSpans = new Map<string, { min: number; max: number }>();
+		for (const note of drag.selectionNotes) {
+			const newRow = note.rowOffset + candidate.rowIndex;
+			const newStart = note.tickOffset + candidate.startTick;
+			if (newRow < 0 || newRow >= rows.length) {
+				return { valid: false, tickDelta, rowDelta };
+			}
+			if (!respectsBarlines(newStart, note.durationTicks)) {
+				return { valid: false, tickDelta, rowDelta };
+			}
+			if (rowHasCollision(newRow, newStart, note.durationTicks, drag.selectionNoteIds, note.groupId ?? undefined)) {
+				return { valid: false, tickDelta, rowDelta };
+			}
+			if (note.groupType === 'triplet-eighth' && note.groupId) {
+				const entry = tripletSpans.get(note.groupId) ?? { min: Infinity, max: -Infinity };
+				entry.min = Math.min(entry.min, newStart);
+				entry.max = Math.max(entry.max, newStart + note.durationTicks);
+				tripletSpans.set(note.groupId, entry);
+			}
+		}
+		for (const span of tripletSpans.values()) {
+			const spanTicks = span.max - span.min;
+			if (!withinSingleBeat(span.min, spanTicks)) {
+				return { valid: false, tickDelta, rowDelta };
+			}
+		}
+		return { valid: true, tickDelta, rowDelta };
 	};
 
 	const isInsideGrid = (x: number, y: number) =>
@@ -597,7 +853,7 @@ let externalPreview: {
 } | null = null;
 
 export function previewSidebarDrop(request: SidebarDropRequest | null, point: { clientX: number; clientY: number }) {
-	if (!request || activeDrag) return false;
+	if (!request || activeDrag || multiSelectEnabled) return false;
 	const coords = clientToCanvasPoint(point.clientX, point.clientY);
 	if (!coords) {
 		clearExternalPreview();
@@ -611,7 +867,7 @@ export function previewSidebarDrop(request: SidebarDropRequest | null, point: { 
 		durationTicks,
 		rowSpan,
 		(durationTicks * pxPerTick) / 2,
-		(rowSpan * cellHeight) / 2
+		noteBlockHeight(rowSpan) / 2
 	);
 	if (!candidate) {
 		clearExternalPreview();
@@ -655,13 +911,13 @@ const updateExternalGhost = (
 	if (needsNewGhost) {
 		externalPreview?.ghost.destroy();
 		const ghost = new Graphics();
-		const height = rowSpan * cellHeight - 4;
+		const height = noteBlockHeight(rowSpan);
 		const fillColor = request.type === 'note' ? request.payload.color : 0xffffff;
 		ghost.roundRect(0, 0, durationTicks * pxPerTick, height, 6).fill(fillColor, request.type === 'note' ? 0.55 : 0.35);
 		highlightLayer.addChild(ghost);
 		externalPreview = { ghost, type: request.type, durationTicks, rowSpan };
 	}
-	externalPreview?.ghost.position.set(tickToX(position.startTick), rowToY(position.rowIndex));
+	externalPreview?.ghost.position.set(tickToX(position.startTick), noteBlockY(position.rowIndex));
 };
 
 const clearExternalPreview = () => {
@@ -672,7 +928,7 @@ const clearExternalPreview = () => {
 };
 
 export function handleSidebarDrop(request: SidebarDropRequest | null, point: { clientX: number; clientY: number }) {
-	if (!request) return false;
+	if (!request || multiSelectEnabled) return false;
 	const coords = clientToCanvasPoint(point.clientX, point.clientY);
 	if (!coords) return false;
 	const durationTicks = request.payload.durationTicks;
@@ -683,7 +939,7 @@ export function handleSidebarDrop(request: SidebarDropRequest | null, point: { c
 		durationTicks,
 		rowSpan,
 		(durationTicks * pxPerTick) / 2,
-		(rowSpan * cellHeight) / 2
+		noteBlockHeight(rowSpan) / 2
 	);
 	if (!candidate) {
 		clearExternalPreview();
@@ -738,13 +994,17 @@ $: if (app) {
 		notes;
 		playheadSeconds;
 		motifMode;
+		selectedNoteIds;
 		renderNotes();
 	}
 
-	$: if (app && !motifMode) {
-		selectionGraphic?.clear();
-		selectionGraphic && (selectionGraphic.visible = false);
+	$: if (app && !motifMode && !multiSelectEnabled) {
+		selectionOutline?.clear();
+		selectionFill?.clear();
+		if (selectionOutline) selectionOutline.visible = false;
+		if (selectionFill) selectionFill.visible = false;
 		selectionStart = null;
+		selectionContext = null;
 	}
 </script>
 

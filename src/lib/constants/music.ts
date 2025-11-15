@@ -61,66 +61,66 @@ const buildNote = (config: Omit<NoteDefinition, 'durationTicks'>): NoteDefinitio
 export const NOTE_PALETTE: NoteDefinition[] = [
 	buildNote({
 		id: 'whole',
-		label: 'Whole — 4 beats',
+		label: 'Whole Note',
 		color: toColor('#e74c3c'),
-		description: 'Whole note (4 beats). Only valid in 4/4.',
+		description: 'Classic whole note. Only valid in 4/4.',
 		durationBeats: 4,
 		restrictTo: ['4/4']
 	}),
 	buildNote({
 		id: 'dotted-half',
-		label: 'Dotted Half — 3 beats',
+		label: 'Dotted Half Note',
 		color: toColor('#f39c12'),
-		description: 'Dotted half (3 beats).',
+		description: 'Smooth dotted half note.',
 		durationBeats: 3
 	}),
 	buildNote({
 		id: 'half',
-		label: 'Half — 2 beats',
+		label: 'Half Note',
 		color: toColor('#f1c40f'),
-		description: 'Half note (2 beats).',
+		description: 'Straight half note value.',
 		durationBeats: 2
 	}),
 	buildNote({
 		id: 'dotted-quarter',
-		label: 'Dotted Quarter — 1.5 beats',
+		label: 'Dotted Quarter Note',
 		color: toColor('#27ae60'),
-		description: 'Dotted quarter (1.5 beats).',
+		description: 'Dotted quarter note for forward motion.',
 		durationBeats: 1.5
 	}),
 	buildNote({
 		id: 'quarter',
-		label: 'Quarter — 1 beat',
+		label: 'Quarter Note',
 		color: toColor('#5dade2'),
-		description: 'Quarter note (1 beat).',
+		description: 'Dependable quarter note value.',
 		durationBeats: 1
 	}),
 	buildNote({
 		id: 'dotted-eighth',
-		label: 'Dotted Eighth — 0.75 beat',
+		label: 'Dotted Eighth Note',
 		color: toColor('#1f618d'),
-		description: 'Dotted eighth (0.75 beat).',
+		description: 'Dotted eighth for lilting rhythms.',
 		durationBeats: 0.75
 	}),
 	buildNote({
 		id: 'eighth',
-		label: 'Eighth — 0.5 beat',
+		label: 'Eighth Note',
 		color: toColor('#ff6fa6'),
-		description: 'Eighth note (0.5 beat).',
+		description: 'Straightahead eighth note.',
 		durationBeats: 0.5
 	}),
 	buildNote({
 		id: 'triplet-eighth',
-		label: 'Triplet Eighth — 0.33 beat',
+		label: 'Triplet Eighth Note',
 		color: toColor('#8e5b2d'),
-		description: 'Triplet eighth (⅓ beat).',
+		description: 'Triplet subdivision for swing.',
 		durationBeats: 1 / 3
 	}),
 	buildNote({
 		id: 'sixteenth',
-		label: 'Sixteenth — 0.25 beat',
+		label: 'Sixteenth Note',
 		color: toColor('#8e44ad'),
-		description: 'Sixteenth note (0.25 beat).',
+		description: 'Tight sixteenth note for rapid phrases.',
 		durationBeats: 0.25
 	})
 ];

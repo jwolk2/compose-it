@@ -67,6 +67,8 @@ const createSampler = (config: SamplerConfig) => {
 
 interface LayeredInstrument {
 	triggerAttackRelease: (pitch: string, duration: number, time: number, velocity?: number) => void;
+	releaseAll: () => void;
+	restoreLevel: () => void;
 	dispose: () => void;
 }
 
@@ -75,6 +77,7 @@ let layeredInstrumentPromise: Promise<LayeredInstrument> | null = null;
 let part: Tone.Part | null = null;
 let playbackDuration = 0;
 let playbackStart = 0;
+let playbackOffset = 0;
 let scheduledStart: number | null = null;
 let pendingStartResolve: (() => void) | null = null;
 let contextConfigured = false;
@@ -114,9 +117,12 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 
 	const mix = new Tone.Gain(0.95);
 	const compressor = new Tone.Compressor({ threshold: -24, ratio: 2.1, attack: 0.008, release: 0.24 });
-	const masterGain = new Tone.Gain(0.88);
-	const reverbSend = new Tone.Gain(0.28);
-	const reverb = new Tone.Reverb({ decay: 2.6, wet: 0.24 });
+	const BASE_LEVEL = 0.88;
+	const BASE_SEND = 0.28;
+	const BASE_WET = 0.24;
+	const masterGain = new Tone.Gain(BASE_LEVEL);
+	const reverbSend = new Tone.Gain(BASE_SEND);
+	const reverb = new Tone.Reverb({ decay: 2.6, wet: BASE_WET });
 
 	piano.chain(pianoFilter, pianoGain, mix);
 	horn.chain(hornColor, hornPresence, hornChorus, hornGain, mix);
@@ -140,7 +146,30 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 				horn.triggerAttackRelease(pitch, hornDuration, time, clamp(vel * hornWeight));
 			}
 		},
+		releaseAll: () => {
+			const now = Tone.now();
+			piano.releaseAll?.(now);
+			horn.releaseAll?.(now);
+			masterGain.gain.cancelScheduledValues(now);
+			masterGain.gain.setValueAtTime(0, now);
+			reverbSend.gain.cancelScheduledValues(now);
+			reverbSend.gain.setValueAtTime(0, now);
+			reverb.wet.cancelScheduledValues(now);
+			reverb.wet.setValueAtTime(0, now);
+		},
+		restoreLevel: () => {
+			const now = Tone.now();
+			masterGain.gain.cancelScheduledValues(now);
+			masterGain.gain.setValueAtTime(BASE_LEVEL, now);
+			reverbSend.gain.cancelScheduledValues(now);
+			reverbSend.gain.setValueAtTime(BASE_SEND, now);
+			reverb.wet.cancelScheduledValues(now);
+			reverb.wet.setValueAtTime(BASE_WET, now);
+		},
 		dispose: () => {
+			const now = Tone.now();
+			piano.releaseAll?.(now);
+			horn.releaseAll?.(now);
 			piano.dispose();
 			horn.dispose();
 			pianoFilter.dispose();
@@ -209,25 +238,41 @@ const disposePart = () => {
 	}
 };
 
-export const play = async (state: ComposerState) => {
+export const play = async (state: ComposerState, startSeconds = 0) => {
 	if (!browser) return { duration: 0, started: Promise.resolve() };
 	await Tone.start();
 	configureContext();
 	const { events, duration, bpm } = buildEvents(state);
 	if (!events.length) return { duration: 0, started: Promise.resolve() };
+	const offset = Math.min(Math.max(startSeconds, 0), duration);
 	const instrument = await ensureInstrument();
 	await stop();
+	instrument.restoreLevel();
+	playbackDuration = duration;
+	playbackOffset = offset;
 	Tone.Transport.bpm.value = bpm;
-	const partPayload = events.map((event) => ({
-		time: event.time,
-		pitch: event.pitch,
-		duration: event.duration
-	}));
+	const partPayload = events
+		.map((event) => {
+			const eventEnd = event.time + event.duration;
+			if (eventEnd <= offset) return null;
+			const start = Math.max(event.time, offset);
+			const trimmedDuration = Math.max(0.01, eventEnd - start);
+			return {
+				time: start - offset,
+				pitch: event.pitch,
+				duration: trimmedDuration
+			};
+		})
+		.filter(Boolean) as { time: number; pitch: string; duration: number }[];
+	if (!partPayload.length) {
+		playbackStart = 0;
+		return { duration: 0, started: Promise.resolve() };
+	}
 	part = new Tone.Part<{ time: number; pitch: string; duration: number }>((time, value) => {
 		instrument.triggerAttackRelease(value.pitch, value.duration, time, 0.85);
 	}, partPayload);
-	part.start(0).stop(duration + 0.5);
-	playbackDuration = duration;
+	const remainingDuration = Math.max(0, duration - offset);
+	part.start(0).stop(remainingDuration + 0.5);
 	clearScheduledStart();
 	const started = new Promise<void>((resolve) => {
 		pendingStartResolve = resolve;
@@ -247,12 +292,14 @@ export const play = async (state: ComposerState) => {
 
 export const stop = async () => {
 	if (!browser) return;
+	layeredInstrument?.releaseAll?.();
 	Tone.Transport.stop();
 	Tone.Transport.cancel(0);
 	Tone.Transport.position = 0;
 	clearScheduledStart();
 	disposePart();
 	playbackStart = 0;
+	playbackOffset = 0;
 };
 
 export interface ProgressSnapshot {
@@ -265,7 +312,8 @@ export const getProgress = (duration: number): ProgressSnapshot => {
 		return { ratio: 0, elapsedSeconds: 0 };
 	}
 	const total = playbackDuration || duration;
-	const elapsed = Math.min(total, Math.max(0, Tone.Transport.seconds));
+	const elapsedSegment = Math.max(0, Tone.Transport.seconds);
+	const elapsed = Math.min(total, playbackOffset + elapsedSegment);
 	const ratio = total > 0 ? Math.min(1, elapsed / total) : 0;
 	return { ratio, elapsedSeconds: elapsed };
 };

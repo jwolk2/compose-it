@@ -51,6 +51,10 @@ export interface Motif {
 		rowOffset: number;
 		startTickOffset: number;
 		durationTicks: number;
+		groupKey?: string;
+		groupType?: string;
+		groupIndex?: number;
+		groupSize?: number;
 	}>;
 	widthTicks: number;
 	rowSpan: number;

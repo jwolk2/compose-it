@@ -41,7 +41,7 @@ textarea {
 	font-family: inherit;
 }
 
-.main-shell {
+ .main-shell {
 	min-height: 100vh;
 	height: 100vh;
 	margin: 0 auto;
@@ -101,4 +101,10 @@ button.primary {
 button.ghost {
 	background: rgba(255, 255, 255, 0.08);
 	border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+button.secondary {
+	background: rgba(255, 255, 255, 0.02);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	color: inherit;
 }
