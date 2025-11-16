@@ -5,12 +5,56 @@ import { TEMPOS } from '$lib/constants/music';
 import { gridDurationSeconds, ticksToSeconds } from '$lib/utils/noteTiming';
 import { audioBufferToWav, toneBufferToAudioBuffer } from '$lib/utils/audio';
 
+const PLAYBACK_TAIL_SECONDS = 1.5;
+const RELEASE_FADE_SECONDS = 0.35;
+const MIN_HORN_WEIGHT = 0.4;
+
+interface LayeredInstrument {
+	triggerAttackRelease: (pitch: string, duration: number, time: number, velocity?: number) => void;
+	releaseAll: () => void;
+	restoreLevel: () => void;
+	dispose: () => void;
+}
+
+let layeredInstrument: LayeredInstrument | null = null;
+let layeredInstrumentPromise: Promise<LayeredInstrument> | null = null;
+let part: Tone.Part | null = null;
+let playbackDuration = 0;
+let playbackStart = 0;
+let playbackOffset = 0;
+let scheduledStart: number | null = null;
+let pendingStartResolve: (() => void) | null = null;
+let contextConfigured = false;
+let pendingTailReset: ReturnType<typeof setTimeout> | null = null;
+
+const getTempoValue = (tempo: TempoId) => TEMPOS.find((entry) => entry.id === tempo)?.bpm ?? 80;
+
+const configureContext = () => {
+	if (contextConfigured) return;
+	const ctx = Tone.getContext();
+	ctx.lookAhead = 0;
+	if ('latencyHint' in (ctx as unknown as { latencyHint?: string })) {
+		try {
+			((ctx as unknown) as AudioContext & { latencyHint?: string }).latencyHint = 'interactive';
+		} catch {
+			// Some runtimes expose latencyHint as read-only.
+		}
+	}
+	const transport = Tone.getTransport() as { lookAhead?: number; updateInterval?: number };
+	if (transport.lookAhead !== undefined) transport.lookAhead = 0;
+	if (transport.updateInterval !== undefined) transport.updateInterval = 0.02;
+	contextConfigured = true;
+};
+
+const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+
 type SamplerConfig = Pick<Tone.SamplerOptions, 'urls' | 'baseUrl'> &
 	Partial<Omit<Tone.SamplerOptions, 'urls' | 'baseUrl'>>;
 
 const PIANO_SAMPLER_OPTIONS: SamplerConfig = {
 	baseUrl: 'https://tonejs.github.io/audio/salamander/',
-	release: 0.75,
+	release: 0.2,
+	attack: 0.002,
 	urls: {
 		A2: 'A2.mp3',
 		C3: 'C3.mp3',
@@ -26,8 +70,8 @@ const PIANO_SAMPLER_OPTIONS: SamplerConfig = {
 
 const HORN_SAMPLER_OPTIONS: SamplerConfig = {
 	baseUrl: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/french_horn-mp3/',
-	attack: 0.03,
-	release: 1.4,
+	attack: 0.01,
+	release: 0.35,
 	urls: {
 		C2: 'C2.mp3',
 		E2: 'E2.mp3',
@@ -65,67 +109,29 @@ const createSampler = (config: SamplerConfig) => {
 	return { sampler, loaded };
 };
 
-interface LayeredInstrument {
-	triggerAttackRelease: (pitch: string, duration: number, time: number, velocity?: number) => void;
-	releaseAll: () => void;
-	restoreLevel: () => void;
-	dispose: () => void;
-}
-
-let layeredInstrument: LayeredInstrument | null = null;
-let layeredInstrumentPromise: Promise<LayeredInstrument> | null = null;
-let part: Tone.Part | null = null;
-let playbackDuration = 0;
-let playbackStart = 0;
-let playbackOffset = 0;
-let scheduledStart: number | null = null;
-let pendingStartResolve: (() => void) | null = null;
-let contextConfigured = false;
-
-const getTempoValue = (tempo: TempoId) => TEMPOS.find((entry) => entry.id === tempo)?.bpm ?? 80;
-
-const configureContext = () => {
-	if (contextConfigured) return;
-	const ctx = Tone.getContext();
-	ctx.lookAhead = 0;
-	if ('latencyHint' in (ctx as unknown as { latencyHint?: string })) {
-		try {
-			((ctx as unknown) as AudioContext & { latencyHint?: string }).latencyHint = 'interactive';
-		} catch {
-			// Some runtimes expose latencyHint as read-only.
-		}
-	}
-	const transport = Tone.getTransport() as { lookAhead?: number; updateInterval?: number };
-	if (transport.lookAhead !== undefined) transport.lookAhead = 0;
-	if (transport.updateInterval !== undefined) transport.updateInterval = 0.02;
-	contextConfigured = true;
-};
-
-const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
-
 const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 	const { sampler: piano, loaded: pianoLoaded } = createSampler(PIANO_SAMPLER_OPTIONS);
 	const { sampler: horn, loaded: hornLoaded } = createSampler(HORN_SAMPLER_OPTIONS);
 
-	const pianoFilter = new Tone.Filter({ type: 'lowpass', frequency: 5200, rolloff: -12 });
-	const pianoGain = new Tone.Gain(0.8);
+	const pianoBody = new Tone.Filter({ type: 'lowpass', frequency: 7200, Q: 0.8 });
+	const pianoTrim = new Tone.Filter({ type: 'highpass', frequency: 120 });
+	const pianoGain = new Tone.Gain(0.85);
 
-	const hornColor = new Tone.Filter({ type: 'lowshelf', frequency: 220, gain: 3 });
-	const hornPresence = new Tone.Filter({ type: 'highshelf', frequency: 3800, gain: -4 });
-	const hornChorus = new Tone.Chorus({ frequency: 0.25, delayTime: 4.2, depth: 0.18, wet: 0.1 }).start();
-	const hornGain = new Tone.Gain(0.7);
+	const hornFocus = new Tone.Filter({ type: 'bandpass', frequency: 840, Q: 0.9 });
+	const hornTrim = new Tone.Filter({ type: 'highpass', frequency: 200 });
+	const hornGain = new Tone.Gain(1.05);
 
-	const mix = new Tone.Gain(0.95);
-	const compressor = new Tone.Compressor({ threshold: -24, ratio: 2.1, attack: 0.008, release: 0.24 });
-	const BASE_LEVEL = 0.88;
-	const BASE_SEND = 0.28;
-	const BASE_WET = 0.24;
+	const mix = new Tone.Gain(0.9);
+	const compressor = new Tone.Compressor({ threshold: -28, ratio: 2.8, attack: 0.012, release: 0.22 });
+	const BASE_LEVEL = 0.82;
+	const BASE_SEND = 0.08;
+	const BASE_WET = 0.08;
 	const masterGain = new Tone.Gain(BASE_LEVEL);
 	const reverbSend = new Tone.Gain(BASE_SEND);
-	const reverb = new Tone.Reverb({ decay: 2.6, wet: BASE_WET });
+	const reverb = new Tone.Reverb({ decay: 1.4, wet: BASE_WET });
 
-	piano.chain(pianoFilter, pianoGain, mix);
-	horn.chain(hornColor, hornPresence, hornChorus, hornGain, mix);
+	piano.chain(pianoBody, pianoTrim, pianoGain, mix);
+	horn.chain(hornFocus, hornTrim, hornGain, mix);
 
 	mix.chain(compressor, masterGain, Tone.Destination);
 	mix.connect(reverbSend);
@@ -138,24 +144,29 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 		triggerAttackRelease: (pitch, duration, time, velocity = 0.85) => {
 			const vel = clamp(velocity);
 			const midi = Tone.Frequency(pitch).toMidi();
-			piano.triggerAttackRelease(pitch, duration, time, Math.min(1, vel * 0.9));
+			const dynamic = Math.min(1, vel * 0.95);
+			const sustainDuration = Math.max(0.04, duration);
+			piano.triggerAttackRelease(pitch, sustainDuration, time, dynamic * 0.85);
 
-			const hornWeight = clamp(1 - Math.max(0, midi - 67) / 20); // fade horn above ~D5
+			const hornWeight = clamp(1 - Math.max(0, midi - 68) / 18, MIN_HORN_WEIGHT);
 			if (hornWeight > 0.05) {
-				const hornDuration = duration + 0.18;
-				horn.triggerAttackRelease(pitch, hornDuration, time, clamp(vel * hornWeight));
+				horn.triggerAttackRelease(pitch, sustainDuration, time, clamp(dynamic * hornWeight * 1.1));
 			}
 		},
 		releaseAll: () => {
 			const now = Tone.now();
 			piano.releaseAll?.(now);
 			horn.releaseAll?.(now);
+			const fadeTarget = now + RELEASE_FADE_SECONDS;
 			masterGain.gain.cancelScheduledValues(now);
-			masterGain.gain.setValueAtTime(0, now);
+			masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+			masterGain.gain.linearRampToValueAtTime(0, fadeTarget);
 			reverbSend.gain.cancelScheduledValues(now);
-			reverbSend.gain.setValueAtTime(0, now);
+			reverbSend.gain.setValueAtTime(reverbSend.gain.value, now);
+			reverbSend.gain.linearRampToValueAtTime(0, fadeTarget);
 			reverb.wet.cancelScheduledValues(now);
-			reverb.wet.setValueAtTime(0, now);
+			reverb.wet.setValueAtTime(reverb.wet.value, now);
+			reverb.wet.linearRampToValueAtTime(0, fadeTarget);
 		},
 		restoreLevel: () => {
 			const now = Tone.now();
@@ -172,11 +183,11 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 			horn.releaseAll?.(now);
 			piano.dispose();
 			horn.dispose();
-			pianoFilter.dispose();
+			pianoBody.dispose();
+			pianoTrim.dispose();
 			pianoGain.dispose();
-			hornColor.dispose();
-			hornPresence.dispose();
-			hornChorus.dispose();
+			hornFocus.dispose();
+			hornTrim.dispose();
 			hornGain.dispose();
 			mix.dispose();
 			compressor.dispose();
@@ -207,11 +218,11 @@ const buildEvents = (state: ComposerState) => {
 	const bpm = getTempoValue(state.tempo);
 	const gridDuration = gridDurationSeconds(state.meter, bpm);
 	const events = state.notes
-		.map((note) => ({
-			time: ticksToSeconds(note.startTick, bpm),
-			pitch: note.pitch,
-			duration: Math.max(0.01, ticksToSeconds(note.durationTicks, bpm))
-		}))
+		.map((note) => {
+			const time = ticksToSeconds(note.startTick, bpm);
+			const duration = Math.max(0.04, ticksToSeconds(note.durationTicks, bpm));
+			return { time, pitch: note.pitch, duration };
+		})
 		.sort((a, b) => a.time - b.time);
 	const lastEventEnd = events.length ? Math.max(...events.map((event) => event.time + event.duration)) : 0;
 	const duration = Math.max(gridDuration, lastEventEnd);
@@ -238,6 +249,13 @@ const disposePart = () => {
 	}
 };
 
+const finalizeStopState = () => {
+	layeredInstrument?.releaseAll?.();
+	disposePart();
+	playbackStart = 0;
+	playbackOffset = 0;
+};
+
 export const play = async (state: ComposerState, startSeconds = 0) => {
 	if (!browser) return { duration: 0, started: Promise.resolve() };
 	await Tone.start();
@@ -248,7 +266,7 @@ export const play = async (state: ComposerState, startSeconds = 0) => {
 	const instrument = await ensureInstrument();
 	await stop();
 	instrument.restoreLevel();
-	playbackDuration = duration;
+	playbackDuration = duration + PLAYBACK_TAIL_SECONDS;
 	playbackOffset = offset;
 	Tone.Transport.bpm.value = bpm;
 	const partPayload = events
@@ -272,7 +290,7 @@ export const play = async (state: ComposerState, startSeconds = 0) => {
 		instrument.triggerAttackRelease(value.pitch, value.duration, time, 0.85);
 	}, partPayload);
 	const remainingDuration = Math.max(0, duration - offset);
-	part.start(0).stop(remainingDuration + 0.5);
+	part.start(0).stop(remainingDuration + PLAYBACK_TAIL_SECONDS);
 	clearScheduledStart();
 	const started = new Promise<void>((resolve) => {
 		pendingStartResolve = resolve;
@@ -290,16 +308,27 @@ export const play = async (state: ComposerState, startSeconds = 0) => {
 	return { duration, started };
 };
 
-export const stop = async () => {
+export const stop = async ({ allowTail = false }: { allowTail?: boolean } = {}) => {
 	if (!browser) return;
-	layeredInstrument?.releaseAll?.();
+	if (pendingTailReset) {
+		clearTimeout(pendingTailReset);
+		pendingTailReset = null;
+	}
 	Tone.Transport.stop();
 	Tone.Transport.cancel(0);
 	Tone.Transport.position = 0;
 	clearScheduledStart();
-	disposePart();
 	playbackStart = 0;
 	playbackOffset = 0;
+	if (allowTail) {
+		part?.stop();
+		pendingTailReset = setTimeout(() => {
+			pendingTailReset = null;
+			finalizeStopState();
+		}, PLAYBACK_TAIL_SECONDS * 1000);
+	} else {
+		finalizeStopState();
+	}
 };
 
 export interface ProgressSnapshot {
@@ -322,7 +351,7 @@ export const recordWav = async (state: ComposerState) => {
 	if (!browser) return null;
 	const { events, duration, bpm } = buildEvents(state);
 	if (!events.length) return null;
-	const offlineDuration = duration + 0.5;
+	const offlineDuration = duration + PLAYBACK_TAIL_SECONDS;
 	const toneBuffer = await Tone.Offline(async ({ transport }) => {
 		const instrument = await createLayeredInstrument();
 		transport.bpm.value = bpm;

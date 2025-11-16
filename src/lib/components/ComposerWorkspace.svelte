@@ -409,7 +409,7 @@ let pausedAtSeconds = 0;
 					isPlaying = false;
 					playheadSeconds = 0;
 					pausedAtSeconds = 0;
-					audioPlayer?.stop();
+					audioPlayer?.stop({ allowTail: true });
 					progressLoop.stop();
 				}
 			}

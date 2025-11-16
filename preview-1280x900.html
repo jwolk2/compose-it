@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Compose-It 1280×900 Preview</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, rgba(92, 108, 255, 0.35), transparent 55%),
+        linear-gradient(135deg, #050816 0%, #0e1129 50%, #050816 100%);
+      font-family: system-ui, sans-serif;
+      color: #f8f9ff;
+    }
+    .compose-it-frame {
+      position: relative;
+      width: 1280px;
+      height: 900px;
+      margin: 0 auto;
+      transform-origin: top center;
+    }
+    .compose-it-frame iframe {
+      border: none;
+      width: 1280px;
+      height: 900px;
+      border-radius: 24px;
+      box-shadow: 0 25px 70px rgba(5, 8, 22, 0.45);
+      background: #0b0f23;
+    }
+    @media (max-width: 1280px) {
+      .compose-it-frame {
+        transform: scale(calc(100vw / 1280));
+      }
+      body {
+        overflow-x: hidden;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="compose-it-frame">
+    <iframe src="http://localhost:5173/" title="Compose-It Preview" allowfullscreen></iframe>
+  </div>
+</body>
+</html>
