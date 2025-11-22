@@ -35,10 +35,46 @@ import { onDestroy, onMount, createEventDispatcher } from 'svelte';
 	onDestroy(() => {
 		unsubscribe();
 		progressLoop.stop();
+		if (statusTimer) clearTimeout(statusTimer);
+		if (errorTimer) clearTimeout(errorTimer);
 	});
 
 	let statusMessage = '';
 	let errorMessage = '';
+	const STATUS_TIMEOUT_MS = 4000;
+	const ERROR_TIMEOUT_MS = 4000;
+	let statusTimer: ReturnType<typeof setTimeout> | null = null;
+	let errorTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const setStatus = (message: string, { persist = false }: { persist?: boolean } = {}) => {
+		if (statusTimer) {
+			clearTimeout(statusTimer);
+			statusTimer = null;
+		}
+		statusMessage = message;
+		if (message && !persist) {
+			const snapshot = message;
+			statusTimer = setTimeout(() => {
+				if (statusMessage === snapshot) statusMessage = '';
+				statusTimer = null;
+			}, STATUS_TIMEOUT_MS);
+		}
+	};
+
+	const setError = (message: string) => {
+		if (errorTimer) {
+			clearTimeout(errorTimer);
+			errorTimer = null;
+		}
+		errorMessage = message;
+		if (message) {
+			const snapshot = message;
+			errorTimer = setTimeout(() => {
+				if (errorMessage === snapshot) errorMessage = '';
+				errorTimer = null;
+			}, ERROR_TIMEOUT_MS);
+		}
+	};
 	let isSaveDialogOpen = false;
 	let dialogMode: 'save' | 'export' = 'export';
 	let requestingName = '';
@@ -155,10 +191,10 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 
 	const handlePlacementResult = (result: PlacementActionResult) => {
 		if (result.ok) {
-			statusMessage = 'Placement applied';
-			errorMessage = '';
+			setStatus('Placement applied');
+			setError('');
 		} else if (result.reason) {
-			errorMessage = result.reason;
+			setError(result.reason);
 		}
 	};
 
@@ -182,7 +218,7 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 
 	const handleDelete = (event: CustomEvent<{ noteId: string }>) => {
 		composerStore.removeNote(event.detail.noteId);
-		statusMessage = 'Note removed';
+		setStatus('Note removed');
 	};
 
 	const handlePlaceMotif = (event: CustomEvent<{ motifId: string; startTick: number; rowIndex: number }>) => {
@@ -196,7 +232,7 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 		if (!name) return;
 		const motif = composerStore.createMotifFromNotes(event.detail.noteIds, name.trim());
 		if (motif) {
-			statusMessage = `Motif "${motif.name}" saved`;
+			setStatus(`Motif "${motif.name}" saved`);
 			motifMode = false;
 		}
 	};
@@ -233,7 +269,7 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 		if (!selectedNoteIds.length) return;
 		composerStore.removeNotes(selectedNoteIds);
 		selectedNoteIds = [];
-		statusMessage = 'Selection deleted';
+		setStatus('Selection deleted');
 	};
 
 	const handleReady = (event: CustomEvent<{ capture: () => string | null }>) => {
@@ -258,7 +294,7 @@ const isNoteDisabled = (definition: NoteDefinition) =>
 
 	const handleTripletGroupDelete = (event: CustomEvent<{ groupId: string }>) => {
 		composerStore.removeTripletGroup(event.detail.groupId);
-		statusMessage = 'Triplet removed';
+		setStatus('Triplet removed');
 	};
 
 	const handleNoteOptionSelect = (definitionId: string) => {
@@ -430,7 +466,7 @@ let pausedAtSeconds = 0;
 		if (confirm('Clear grid?')) {
 			await handleRestart();
 			composerStore.clear();
-			statusMessage = 'Grid cleared';
+			setStatus('Grid cleared');
 		}
 	};
 
@@ -453,7 +489,11 @@ let pausedAtSeconds = 0;
 			selectedNoteId = null;
 			selectedMotifId = null;
 		}
-		statusMessage = motifMode ? 'Motif selection enabled — drag to capture a pattern.' : '';
+		if (motifMode) {
+			setStatus('Motif selection enabled — drag to capture a pattern.', { persist: true });
+		} else {
+			setStatus('');
+		}
 	};
 
 	const handleBackgroundFile = async (event: Event) => {
@@ -472,9 +512,9 @@ let pausedAtSeconds = 0;
 		const text = await file.text();
 		try {
 			composerStore.importState(JSON.parse(text));
-			statusMessage = 'Composition loaded';
+			setStatus('Composition loaded');
 		} catch (error) {
-			errorMessage = 'Invalid JSON file';
+			setError('Invalid JSON file');
 			console.error(error);
 		}
 	};
@@ -485,8 +525,8 @@ let pausedAtSeconds = 0;
 		dialogMode = mode;
 		requestingName = composer.compositionName.trim() || 'composition';
 		nameError = '';
-		errorMessage = '';
-	if (mode === 'save') {
+		setError('');
+		if (mode === 'save') {
 			exportOptions = { grid: false, audio: false, json: true };
 		} else {
 			exportOptions = { grid: true, audio: false, json: false };
@@ -498,7 +538,7 @@ let pausedAtSeconds = 0;
 		const defaultName = composer.compositionName.trim() || 'composition';
 		const safeName = slugify(defaultName);
 		nameError = '';
-		errorMessage = '';
+		setError('');
 		exporting = true;
 
 		if (exportOptions.grid) {
@@ -506,7 +546,7 @@ let pausedAtSeconds = 0;
 			if (image) {
 				exportGridPdf(image, composer);
 			} else {
-				errorMessage = 'Canvas not ready yet';
+				setError('Canvas not ready yet');
 			}
 		}
 
@@ -521,7 +561,7 @@ let pausedAtSeconds = 0;
 
 		exporting = false;
 		isSaveDialogOpen = false;
-		statusMessage = dialogMode === 'save' ? 'Composition saved locally' : 'Export complete';
+		setStatus(dialogMode === 'save' ? 'Composition saved locally' : 'Export complete');
 	};
 
 	const lastSaved = () => new Date(composer.updatedAt).toLocaleTimeString();
@@ -697,13 +737,9 @@ let pausedAtSeconds = 0;
 				<input type="text" value={composer.compositionName} on:input={handleNameChange} placeholder="Composition name" />
 				<p>{METERS[composer.meter].label} · {SCALES[composer.scaleId].label}</p>
 			</div>
-			<div class="status-stack">
-				{#if statusMessage}
-					<span class="status status--success">{statusMessage}</span>
-				{/if}
-				{#if errorMessage}
-					<span class="status status--error">{errorMessage}</span>
-				{/if}
+			<div class="status-stack" aria-live="polite">
+				<span class="status status--success" class:status--visible={Boolean(statusMessage)}>{statusMessage}</span>
+				<span class="status status--error" class:status--visible={Boolean(errorMessage)}>{errorMessage}</span>
 			</div>
 		</header>
 
@@ -1188,16 +1224,33 @@ let pausedAtSeconds = 0;
 
 	.status-stack {
 		display: flex;
-		flex-direction: column;
+		justify-content: flex-end;
+		align-items: center;
+		flex-wrap: nowrap;
 		gap: 0.4rem;
-		min-width: 180px;
-		align-items: flex-end;
+		min-width: 200px;
+		min-height: 34px;
 	}
 
 	.status {
-		padding: 0.35rem 0.65rem;
+		display: inline-flex;
+		align-items: center;
+		padding: 0.35rem 0.8rem;
 		border-radius: 999px;
 		font-size: 0.8rem;
+		white-space: nowrap;
+		opacity: 0;
+		visibility: hidden;
+		pointer-events: none;
+		transform: translateY(4px);
+		transition: opacity 0.2s ease, transform 0.2s ease;
+	}
+
+	.status--visible {
+		opacity: 1;
+		visibility: visible;
+		pointer-events: auto;
+		transform: translateY(0);
 	}
 
 	.status--success {
