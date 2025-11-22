@@ -62,7 +62,8 @@ let exportOptions = {
 
 	const dispatch = createEventDispatcher<{ exit: void }>();
 
-	const paletteOptions = [...NOTE_PALETTE].sort((a, b) => b.durationBeats - a.durationBeats);
+const paletteOptions = [...NOTE_PALETTE].sort((a, b) => b.durationBeats - a.durationBeats);
+const colorToHex = (color: number) => `#${color.toString(16).padStart(6, '0')}`;
 // PNG icons generated locally via scripts/generate_note_icons.py (public-domain assets).
 const RHYTHM_ICON_SOURCES: Record<string, string> = {
 	whole: '/icons/notes/whole.png',
@@ -565,7 +566,7 @@ let pausedAtSeconds = 0;
 								class:active={!multiSelectEnabled && selectedNoteId === option.id}
 								disabled={isNoteDisabled(option)}
 								on:click={() => handleNoteOptionSelect(option.id)}>
-								<span class="note-glyph" aria-hidden="true">
+								<span class="note-glyph" aria-hidden="true" style={`background-color: ${colorToHex(option.color)};`}>
 									<img
 										src={getLocalNoteIcon(option.id)}
 										alt=""
