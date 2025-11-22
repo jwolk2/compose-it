@@ -110,6 +110,7 @@ const createSampler = (config: SamplerConfig) => {
 };
 
 const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
+	const destination = Tone.getDestination();
 	const { sampler: piano, loaded: pianoLoaded } = createSampler(PIANO_SAMPLER_OPTIONS);
 	const { sampler: horn, loaded: hornLoaded } = createSampler(HORN_SAMPLER_OPTIONS);
 
@@ -133,10 +134,10 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 	piano.chain(pianoBody, pianoTrim, pianoGain, mix);
 	horn.chain(hornFocus, hornTrim, hornGain, mix);
 
-	mix.chain(compressor, masterGain, Tone.Destination);
+	mix.chain(compressor, masterGain, destination);
 	mix.connect(reverbSend);
 	reverbSend.connect(reverb);
-	reverb.connect(Tone.Destination);
+	reverb.connect(destination);
 
 	await Promise.all([pianoLoaded, hornLoaded, reverb.generate()]);
 

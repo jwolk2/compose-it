@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import type { ComposerState } from '$lib/types/composer';
-import { METERS } from '$lib/constants/music';
+import { METERS, SCALES } from '$lib/constants/music';
 import { TICKS_PER_BEAT } from '$lib/types/composer';
 import { downloadBlob } from './download';
 
@@ -55,17 +55,85 @@ const pitchToStaffSteps = (pitch: string) => {
 
 export const exportGridPdf = (imageDataUrl: string, state: ComposerState) => {
 	const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+	const pageWidth = pdf.internal.pageSize.getWidth();
+	const pageHeight = pdf.internal.pageSize.getHeight();
+	const horizontalMargin = 48;
+	const cardPadding = 28;
+	const title = state.compositionName || 'Compose-It';
+
+	// background wash
+	pdf.setFillColor(10, 14, 36);
+	pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+
+	// header
+	pdf.setTextColor(255, 255, 255);
 	pdf.setFont('helvetica', 'bold');
-	pdf.setFontSize(22);
-	pdf.text(state.compositionName || 'Compose-It', 40, 50);
-	pdf.setFontSize(12);
+	pdf.setFontSize(26);
+	pdf.text(title, horizontalMargin, 60);
+	pdf.setDrawColor(255, 209, 102);
+	pdf.setLineWidth(1);
+	pdf.line(horizontalMargin, 68, pageWidth - horizontalMargin, 68);
+
 	pdf.setFont('helvetica', 'normal');
-	pdf.text(`Meter: ${state.meter} · Scale: ${state.scaleId} · Tempo: ${state.tempo}`, 40, 70);
-	const pageWidth = pdf.internal.pageSize.getWidth() - 80;
-	const pageHeight = pdf.internal.pageSize.getHeight() - 120;
-	pdf.addImage(imageDataUrl, 'PNG', 40, 90, pageWidth, pageHeight, undefined, 'FAST');
+	pdf.setFontSize(12);
+	pdf.setTextColor(194, 204, 232);
+	const preparedOn = new Date().toLocaleDateString();
+	pdf.text(`Prepared ${preparedOn}`, horizontalMargin, 86);
+
+	// metadata chips
+	const scaleLabel = SCALES[state.scaleId]?.label ?? state.scaleId;
+	const metaEntries = [
+		{ label: 'Meter', value: state.meter },
+		{ label: 'Scale', value: scaleLabel },
+		{ label: 'Tempo', value: state.tempo },
+		{ label: 'Notes', value: `${state.notes.length}` }
+	];
+	let chipX = horizontalMargin;
+	let chipY = 108;
+	pdf.setFontSize(11);
+	metaEntries.forEach((entry) => {
+		const text = `${entry.label}: ${entry.value}`;
+		const chipWidth = pdf.getTextWidth(text) + 18;
+		const maxWidth = pageWidth - horizontalMargin;
+		if (chipX + chipWidth > maxWidth) {
+			chipX = horizontalMargin;
+			chipY += 28;
+		}
+		pdf.setFillColor(22, 28, 56);
+		pdf.setDrawColor(49, 64, 118);
+		pdf.roundedRect(chipX, chipY - 16, chipWidth, 28, 10, 10, 'FD');
+		pdf.setTextColor(220, 229, 255);
+		pdf.text(text, chipX + 9, chipY + 1);
+		chipX += chipWidth + 10;
+	});
+
+	// framed grid card
+	const cardTop = chipY + 26;
+	const cardHeight = pageHeight - cardTop - 60;
+	const cardWidth = pageWidth - horizontalMargin * 2;
+
+	// subtle shadow
+	pdf.setFillColor(6, 8, 20);
+	pdf.roundedRect(horizontalMargin + 6, cardTop + 10, cardWidth, cardHeight, 20, 20, 'F');
+
+	// card background
+	pdf.setFillColor(20, 26, 58);
+	pdf.setDrawColor(74, 92, 146);
+	pdf.setLineWidth(0.8);
+	pdf.roundedRect(horizontalMargin, cardTop, cardWidth, cardHeight, 20, 20, 'FD');
+
+	const imageX = horizontalMargin + cardPadding;
+	const imageY = cardTop + cardPadding;
+	const imageWidth = cardWidth - cardPadding * 2;
+	const imageHeight = cardHeight - cardPadding * 2;
+	pdf.addImage(imageDataUrl, 'PNG', imageX, imageY, imageWidth, imageHeight, undefined, 'FAST');
+
+	pdf.setFontSize(10);
+	pdf.setTextColor(174, 186, 224);
+	pdf.text('Generated via Compose-It · Grid export', horizontalMargin, pageHeight - 30);
+
 	const blob = pdf.output('blob');
-	downloadBlob(blob, `${slugify(state.compositionName)}-grid.pdf`);
+	downloadBlob(blob, `${slugify(title)}-grid.pdf`);
 };
 
 export const exportNotationPdf = (state: ComposerState) => {
