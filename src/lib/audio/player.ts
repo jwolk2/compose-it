@@ -7,7 +7,7 @@ import { audioBufferToWav, toneBufferToAudioBuffer } from '$lib/utils/audio';
 
 const PLAYBACK_TAIL_SECONDS = 1.5;
 const RELEASE_FADE_SECONDS = 0.35;
-const MIN_HORN_WEIGHT = 0.4;
+const MIN_HORN_WEIGHT = 0.25;
 
 interface LayeredInstrument {
 	triggerAttackRelease: (pitch: string, duration: number, time: number, velocity?: number) => void;
@@ -53,8 +53,8 @@ type SamplerConfig = Pick<Tone.SamplerOptions, 'urls' | 'baseUrl'> &
 
 const PIANO_SAMPLER_OPTIONS: SamplerConfig = {
 	baseUrl: 'https://tonejs.github.io/audio/salamander/',
-	release: 0.2,
-	attack: 0.002,
+	release: 0.35,
+	attack: 0.004,
 	urls: {
 		A2: 'A2.mp3',
 		C3: 'C3.mp3',
@@ -70,8 +70,8 @@ const PIANO_SAMPLER_OPTIONS: SamplerConfig = {
 
 const HORN_SAMPLER_OPTIONS: SamplerConfig = {
 	baseUrl: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/french_horn-mp3/',
-	attack: 0.01,
-	release: 0.35,
+	attack: 0.012,
+	release: 0.4,
 	urls: {
 		C2: 'C2.mp3',
 		E2: 'E2.mp3',
@@ -114,27 +114,29 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 	const { sampler: piano, loaded: pianoLoaded } = createSampler(PIANO_SAMPLER_OPTIONS);
 	const { sampler: horn, loaded: hornLoaded } = createSampler(HORN_SAMPLER_OPTIONS);
 
-	const pianoBody = new Tone.Filter({ type: 'lowpass', frequency: 7200, Q: 0.8 });
-	const pianoTrim = new Tone.Filter({ type: 'highpass', frequency: 120 });
-	const pianoGain = new Tone.Gain(0.85);
+	const pianoBody = new Tone.Filter({ type: 'lowpass', frequency: 6800, Q: 0.6 });
+	const pianoTrim = new Tone.Filter({ type: 'highpass', frequency: 140 });
+	const pianoGain = new Tone.Gain(0.82);
 
-	const hornFocus = new Tone.Filter({ type: 'bandpass', frequency: 840, Q: 0.9 });
-	const hornTrim = new Tone.Filter({ type: 'highpass', frequency: 200 });
-	const hornGain = new Tone.Gain(1.05);
+	const hornFocus = new Tone.Filter({ type: 'bandpass', frequency: 780, Q: 0.8 });
+	const hornTrim = new Tone.Filter({ type: 'highpass', frequency: 240 });
+	const hornGain = new Tone.Gain(0.7);
 
 	const mix = new Tone.Gain(0.9);
-	const compressor = new Tone.Compressor({ threshold: -28, ratio: 2.8, attack: 0.012, release: 0.22 });
-	const BASE_LEVEL = 0.82;
-	const BASE_SEND = 0.08;
-	const BASE_WET = 0.08;
+	const compressor = new Tone.Compressor({ threshold: -22, ratio: 3, attack: 0.01, release: 0.25 });
+	const limiter = new Tone.Limiter(-8);
+	const sheenTamer = new Tone.Filter({ type: 'lowpass', frequency: 7200, Q: 0.4 });
+	const BASE_LEVEL = 0.74;
+	const BASE_SEND = 0.05;
+	const BASE_WET = 0.06;
 	const masterGain = new Tone.Gain(BASE_LEVEL);
 	const reverbSend = new Tone.Gain(BASE_SEND);
-	const reverb = new Tone.Reverb({ decay: 1.4, wet: BASE_WET });
+	const reverb = new Tone.Reverb({ decay: 1.6, wet: BASE_WET, highCut: 5200, lowCut: 180 });
 
 	piano.chain(pianoBody, pianoTrim, pianoGain, mix);
 	horn.chain(hornFocus, hornTrim, hornGain, mix);
 
-	mix.chain(compressor, masterGain, destination);
+	mix.chain(compressor, limiter, sheenTamer, masterGain, destination);
 	mix.connect(reverbSend);
 	reverbSend.connect(reverb);
 	reverb.connect(destination);
@@ -147,11 +149,13 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 			const midi = Tone.Frequency(pitch).toMidi();
 			const dynamic = Math.min(1, vel * 0.95);
 			const sustainDuration = Math.max(0.04, duration);
-			piano.triggerAttackRelease(pitch, sustainDuration, time, dynamic * 0.85);
+			const pianoLevel = clamp(dynamic * 0.9);
+			piano.triggerAttackRelease(pitch, sustainDuration, time, pianoLevel);
 
 			const hornWeight = clamp(1 - Math.max(0, midi - 68) / 18, MIN_HORN_WEIGHT);
 			if (hornWeight > 0.05) {
-				horn.triggerAttackRelease(pitch, sustainDuration, time, clamp(dynamic * hornWeight * 1.1));
+				const hornLevel = clamp(dynamic * hornWeight * 0.65);
+				horn.triggerAttackRelease(pitch, sustainDuration, time, hornLevel);
 			}
 		},
 		releaseAll: () => {
@@ -192,6 +196,8 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 			hornGain.dispose();
 			mix.dispose();
 			compressor.dispose();
+			limiter.dispose();
+			sheenTamer.dispose();
 			masterGain.dispose();
 			reverbSend.dispose();
 			reverb.dispose();
