@@ -122,12 +122,12 @@ const createLayeredInstrument = async (): Promise<LayeredInstrument> => {
 	const hornTrim = new Tone.Filter({ type: 'highpass', frequency: 240 });
 	const hornGain = new Tone.Gain(0.7);
 
-	const mix = new Tone.Gain(0.9);
+	const mix = new Tone.Gain(1);
 	const compressor = new Tone.Compressor({ threshold: -22, ratio: 3, attack: 0.01, release: 0.25 });
-	const limiter = new Tone.Limiter(-8);
+	const limiter = new Tone.Limiter(-6);
 	const sheenTamer = new Tone.Filter({ type: 'lowpass', frequency: 7200, Q: 0.4 });
-	const BASE_LEVEL = 0.74;
-	const BASE_SEND = 0.05;
+	const BASE_LEVEL = 0.95;
+	const BASE_SEND = 0.06;
 	const BASE_WET = 0.06;
 	const masterGain = new Tone.Gain(BASE_LEVEL);
 	const reverbSend = new Tone.Gain(BASE_SEND);
