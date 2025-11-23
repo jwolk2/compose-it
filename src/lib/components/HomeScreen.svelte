@@ -20,13 +20,19 @@ const pulsesLabel = (count: number) => pulseNames[count] ?? count.toString();
 
 <section class="home glass-panel">
 	<div class="hero">
-		<p class="badge">New Bedford Symphony Orchestra</p>
-		<h1>Compose-It</h1>
+		<div class="hero-decoration" aria-hidden="true"></div>
+		<div class="logo-wrapper">
+			<div class="logo-badge">
+				<img src="/nbso-logo.png" alt="New Bedford Symphony Orchestra" loading="lazy" />
+			</div>
+		</div>
+		<h1><span>Compose-It</span></h1>
 		<p class="lede">
-			Shape motifs, paint rhythms, and build complete compositions. Pick a time signature to set the
-			stage.
+			Compose-It is a graphic music composition program that allows young<br />(and new) composers to
+			create music in a visual and intuitive way.
 		</p>
 	</div>
+	<p class="subhead">Choose a meter to begin</p>
 	<div class="grid">
 		{#each meters as meter}
 			<button class="card" type="button" on:click={() => dispatch('select', { meter: meter.id })}>
@@ -62,19 +68,95 @@ const pulsesLabel = (count: number) => pulseNames[count] ?? count.toString();
 		display: flex;
 		flex-direction: column;
 		gap: 2.5rem;
-		background: var(--surface-strong);
+		background: linear-gradient(150deg, rgba(12, 24, 58, 0.98), rgba(8, 17, 45, 0.92)),
+			radial-gradient(circle at 15% 15%, rgba(130, 197, 255, 0.22), transparent 45%),
+			radial-gradient(circle at 80% 25%, rgba(94, 192, 255, 0.2), transparent 55%);
+		position: relative;
+		overflow: hidden;
+	}
+
+	.hero {
+		position: relative;
+		z-index: 1;
+	}
+
+	.logo-wrapper {
+		position: absolute;
+		top: clamp(0.5rem, 2.5vw, 1.25rem);
+		right: clamp(1rem, 4vw, 2rem);
+		z-index: 2;
+	}
+
+	.logo-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.82);
+		border: 1px solid rgba(0, 0, 0, 0.06);
+		border-radius: 18px;
+		padding: 0.65rem 1.05rem;
+		box-shadow: 0 16px 38px rgba(0, 0, 0, 0.25);
+	}
+
+	.logo-badge img {
+		height: clamp(100px, 14vw, 150px);
+		width: auto;
+		display: block;
+	}
+
+	.hero-decoration {
+		position: absolute;
+		inset: -20px;
+		background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.08), transparent 60%),
+			radial-gradient(circle at 60% 10%, rgba(255, 209, 102, 0.18), transparent 50%),
+			radial-gradient(circle at 90% 30%, rgba(138, 180, 255, 0.2), transparent 40%);
+		filter: blur(35px);
+		z-index: -1;
+		pointer-events: none;
+		opacity: 0.8;
+	}
+
+	.home::after {
+		content: '';
+		position: absolute;
+		inset: 6px;
+		border-radius: 28px;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		pointer-events: none;
 	}
 
 	.hero h1 {
 		font-family: 'Space Grotesk', 'Inter', sans-serif;
-		font-size: clamp(2.8rem, 12vw, 4.5rem);
+		font-size: clamp(4.2rem, 14vw, 7rem);
 		margin: 0.5rem 0;
 	}
 
+	.hero h1 span {
+		display: inline-block;
+		background: linear-gradient(120deg, #ffd166, #ff8ba7 40%, #8ab4ff 70%, #c8ffe0);
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+		color: transparent;
+		text-shadow: 0 8px 25px rgba(0, 0, 0, 0.45);
+	}
+
 	.lede {
-		font-size: 1.05rem;
+		font-size: 1.25rem;
 		max-width: 640px;
 		color: var(--muted);
+		font-family: 'Fresca', 'Didot', 'Times New Roman', serif;
+	}
+
+	.subhead {
+		text-align: center;
+		margin: 0;
+		margin-top: -0.5rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		color: #e7ecfb;
+		font-family: 'Didot', 'Times New Roman', serif;
+		font-size: 1.25rem;
 	}
 
 	.grid {
@@ -85,21 +167,37 @@ const pulsesLabel = (count: number) => pulseNames[count] ?? count.toString();
 
 	.card {
 		border: none;
-		background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+		background: linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04))
+				border-box,
+			radial-gradient(circle at 20% 20%, rgba(198, 236, 255, 0.4), transparent 55%) border-box;
 		border-radius: 20px;
 		padding: 1rem 1.5rem 1.5rem;
 		text-align: left;
 		color: inherit;
 		cursor: pointer;
-		transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		transition: transform 0.25s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+		border: 1px solid transparent;
+		box-shadow: 0 30px 60px rgba(0, 0, 0, 0.35);
+		position: relative;
+		overflow: hidden;
 	}
 
 	.card:hover,
 	.card:focus-visible {
-		transform: translateY(-6px);
-		border-color: rgba(255, 255, 255, 0.35);
-		box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+		transform: translateY(-10px);
+		border-color: rgba(255, 255, 255, 0.55);
+		background: linear-gradient(150deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.05)),
+			radial-gradient(circle at 20% 20%, rgba(255, 209, 102, 0.4), transparent 55%);
+		box-shadow: 0 30px 65px rgba(0, 0, 0, 0.45);
+	}
+
+	.card::after {
+		content: '';
+		position: absolute;
+		inset: 1px;
+		border-radius: 19px;
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		pointer-events: none;
 	}
 
 	.card-top {
@@ -154,6 +252,7 @@ const pulsesLabel = (count: number) => pulseNames[count] ?? count.toString();
 		font-size: 1rem;
 		letter-spacing: 0.08em;
 		text-transform: capitalize;
+		color: rgba(255, 255, 255, 0.8);
 	}
 
 	.card-divider {
@@ -176,7 +275,7 @@ const pulsesLabel = (count: number) => pulseNames[count] ?? count.toString();
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		font-size: 0.7rem;
-		color: var(--muted);
+		color: rgba(255, 255, 255, 0.8);
 		margin-bottom: 0.2rem;
 	}
 

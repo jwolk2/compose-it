@@ -711,7 +711,7 @@ let pausedAtSeconds = 0;
 								<path d="M5 19.5h14" />
 							</svg>
 						</span>
-						<span>Load JSON</span>
+						<span>Load your saved composition (JSON file)</span>
 					</button>
 					<span class="autosave">Autosaved {lastSaved()}</span>
 					{#if selectedNoteIds.length}
