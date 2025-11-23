@@ -42,7 +42,7 @@ import { onDestroy, onMount, createEventDispatcher } from 'svelte';
 	let statusMessage = '';
 	let errorMessage = '';
 	const STATUS_TIMEOUT_MS = 4000;
-	const ERROR_TIMEOUT_MS = 4000;
+	const ERROR_TIMEOUT_MS = 6000;
 	let statusTimer: ReturnType<typeof setTimeout> | null = null;
 	let errorTimer: ReturnType<typeof setTimeout> | null = null;
 

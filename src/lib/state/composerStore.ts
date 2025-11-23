@@ -194,6 +194,7 @@ export const createComposerStore = () => {
 				const offsets = [0, definition.durationTicks, definition.durationTicks * 2];
 				const previewNotes = [...current.notes];
 				for (const offset of offsets) {
+					const offsetIndex = offsets.indexOf(offset);
 					const individualCandidate = {
 						rowIndex: candidate.rowIndex,
 						startTick: candidate.startTick + offset,
@@ -202,7 +203,10 @@ export const createComposerStore = () => {
 					const validation = validatePlacement({
 						meter: current.meter,
 						notes: previewNotes,
-						candidate: individualCandidate
+						candidate: individualCandidate,
+						noteDefinitionId: definition.id,
+						groupType: 'triplet-eighth',
+						groupIndex: offsetIndex
 					});
 					if (!validation.ok) return validation;
 					previewNotes.push({
@@ -244,7 +248,8 @@ export const createComposerStore = () => {
 			const validation = validatePlacement({
 				meter: current.meter,
 				notes: current.notes,
-				candidate
+				candidate,
+				noteDefinitionId: definition.id
 			});
 
 			if (!validation.ok) return validation;
@@ -278,7 +283,10 @@ export const createComposerStore = () => {
 				meter: current.meter,
 				notes: current.notes,
 				candidate,
-				ignoreNoteId: noteId
+				ignoreNoteId: noteId,
+				noteDefinitionId: note.noteDefinitionId,
+				groupType: note.groupType,
+				groupIndex: note.groupIndex
 			});
 
 			if (!validation.ok) return validation;
@@ -328,7 +336,10 @@ export const createComposerStore = () => {
 						startTick: note.startTick + delta,
 						durationTicks: note.durationTicks
 					},
-					ignoreNoteId: note.id
+					ignoreNoteId: note.id,
+					noteDefinitionId: note.noteDefinitionId,
+					groupType: note.groupType,
+					groupIndex: note.groupIndex
 				});
 				if (!validation.ok) return validation;
 			}
@@ -373,7 +384,10 @@ export const createComposerStore = () => {
 				const validation = validatePlacement({
 					meter: current.meter,
 					notes: scratch,
-					candidate
+					candidate,
+					noteDefinitionId: note.noteDefinitionId,
+					groupType: note.groupType,
+					groupIndex: note.groupIndex
 				});
 				if (!validation.ok) return validation;
 				const updatedNote: PlacedNote = {
@@ -492,7 +506,10 @@ export const createComposerStore = () => {
 				const validation = validatePlacement({
 					meter: current.meter,
 					notes: projectedNotes,
-					candidate
+					candidate,
+					noteDefinitionId: definition.id,
+					groupType: extras.groupType,
+					groupIndex: extras.groupIndex
 				});
 				if (!validation.ok) return validation;
 				const note: PlacedNote = {

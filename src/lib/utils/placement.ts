@@ -17,9 +17,24 @@ export interface ValidateOptions {
 	notes: PlacedNote[];
 	candidate: PlacementCandidate;
 	ignoreNoteId?: string;
+	noteDefinitionId?: string;
+	groupType?: PlacedNote['groupType'];
+	groupIndex?: number;
 }
 
-export const validatePlacement = ({ meter, notes, candidate, ignoreNoteId }: ValidateOptions): PlacementValidation => {
+const SIXTEENTH_TICKS = TICKS_PER_BEAT / 4;
+const isTripletNote = (noteDefinitionId?: string, groupType?: PlacedNote['groupType']) =>
+	noteDefinitionId === 'triplet-eighth' || groupType === 'triplet-eighth';
+
+export const validatePlacement = ({
+	meter,
+	notes,
+	candidate,
+	ignoreNoteId,
+	noteDefinitionId,
+	groupType,
+	groupIndex
+}: ValidateOptions): PlacementValidation => {
 	const meterDef = METERS[meter];
 	const totalTicks = meterDef.totalBeats * TICKS_PER_BEAT;
 	const measureTicks = meterDef.beatsPerMeasure * TICKS_PER_BEAT;
@@ -31,6 +46,19 @@ export const validatePlacement = ({ meter, notes, candidate, ignoreNoteId }: Val
 
 	if (startTick + durationTicks > totalTicks) {
 		return { ok: false, reason: 'Exceeds grid length' };
+	}
+
+	const beatOffset = startTick % TICKS_PER_BEAT;
+	const isTriplet = isTripletNote(noteDefinitionId, groupType);
+	const tripletNeedsAnchor = isTriplet && (groupIndex === undefined || groupIndex === 0);
+	if (isTriplet) {
+		if (tripletNeedsAnchor && beatOffset !== 0) {
+			return { ok: false, reason: 'Triplets must start on the first 16th of a beat' };
+		}
+	} else if (durationTicks > SIXTEENTH_TICKS) {
+		if (beatOffset !== 0 && beatOffset !== SIXTEENTH_TICKS * 2) {
+			return { ok: false, reason: 'The note must start on the beat or on the offbeat' };
+		}
 	}
 
 	const startMeasure = Math.floor(startTick / measureTicks);

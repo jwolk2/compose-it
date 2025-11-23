@@ -29,6 +29,8 @@ type ActiveDrag = {
 	definitionId?: string;
 	noteId?: string;
 	groupId?: string;
+	groupType?: string | null;
+	groupIndex?: number | null;
 	motifId?: string;
 	durationTicks: number;
 	rowSpan: number;
@@ -48,6 +50,8 @@ type ActiveDrag = {
 		color: number;
 		groupId?: string | null;
 		groupType?: string | null;
+		noteDefinitionId: string;
+		groupIndex?: number | null;
 	}>;
 	selectionBase?: { startTick: number; rowIndex: number };
 	selectionNoteIds?: Set<string>;
@@ -133,6 +137,23 @@ const withinSingleBeat = (startTick: number, spanTicks: number) => {
 };
 const noteBlockHeight = (rowSpan = 1) => Math.max(6, rowSpan * cellHeight - NOTE_VERTICAL_PADDING * 2);
 const noteBlockY = (rowIndex: number) => rowToY(rowIndex) + NOTE_VERTICAL_PADDING;
+const isStartAllowed = (
+	startTick: number,
+	durationTicks: number,
+	definitionId?: string,
+	groupType?: string | null,
+	groupIndex?: number | null
+) => {
+	const sixteenth = SIXTEENTH_TICK_SIZE;
+	const beatOffset = startTick % TICKS_PER_BEAT;
+	if (definitionId === 'triplet-eighth' || groupType === 'triplet-eighth') {
+		return (groupIndex ?? 0) === 0 ? beatOffset === 0 : true;
+	}
+	if (durationTicks > sixteenth) {
+		return beatOffset === 0 || beatOffset === sixteenth * 2;
+	}
+	return true;
+};
 
 	onMount(async () => {
 		canvas = document.createElement('canvas');
@@ -330,6 +351,8 @@ const beginNotePlacement = (
 			definitionId: selection.definitionId,
 			durationTicks: selection.durationTicks,
 			rowSpan: 1,
+			groupType: selection.definitionId === 'triplet-eighth' ? 'triplet-eighth' : undefined,
+			groupIndex: selection.definitionId === 'triplet-eighth' ? 0 : null,
 			offsetX: ghost.width / 2,
 			offsetY: ghost.height / 2,
 			ghost,
@@ -370,7 +393,9 @@ const beginNotePlacement = (
 				durationTicks: entry.durationTicks,
 				color: entry.color,
 				groupId: entry.groupId,
-				groupType: entry.groupType
+				groupType: entry.groupType,
+				noteDefinitionId: entry.noteDefinitionId,
+				groupIndex: entry.groupIndex ?? null
 			})),
 			selectionBase: { startTick: baseStartTick, rowIndex: baseRowIndex },
 			selectionNoteIds: new Set(selectionNotes.map((entry) => entry.id))
@@ -406,6 +431,8 @@ const beginNotePlacement = (
 				source: 'existing-note',
 				noteId: note.id,
 				groupId: note.groupId,
+				groupType: note.groupType,
+				groupIndex: note.groupIndex ?? 0,
 				durationTicks: groupDuration,
 				rowSpan: 1,
 				offsetX: event.global.x - tickToX(groupStart),
@@ -431,6 +458,8 @@ const beginNotePlacement = (
 			definitionId: note.noteDefinitionId,
 			durationTicks: note.durationTicks,
 			rowSpan: 1,
+			groupType: note.groupType,
+			groupIndex: note.groupIndex ?? null,
 			offsetX: isTriplet ? 0 : centerOffsetX,
 			offsetY: centerOffsetY,
 			ghost,
@@ -529,7 +558,15 @@ const beginNotePlacement = (
 		const beatValid =
 			!activeDrag.limitToBeat ||
 			withinSingleBeat(candidate.startTick, activeDrag.beatSpanTicks ?? activeDrag.durationTicks);
-		const valid = respectsBarlines(candidate.startTick, activeDrag.durationTicks) && !collision && beatValid;
+		const startsAllowed = isStartAllowed(
+			candidate.startTick,
+			activeDrag.durationTicks,
+			activeDrag.definitionId,
+			activeDrag.groupType ?? (activeDrag.groupMode ? 'triplet-eighth' : undefined),
+			activeDrag.groupIndex ?? null
+		);
+		const valid =
+			respectsBarlines(candidate.startTick, activeDrag.durationTicks) && !collision && beatValid && startsAllowed;
 		showHighlight(candidate, valid, activeDrag.rowSpan, activeDrag.durationTicks);
 	};
 
@@ -809,6 +846,9 @@ const rowHasCollision = (
 			if (rowHasCollision(newRow, newStart, note.durationTicks, drag.selectionNoteIds, note.groupId ?? undefined)) {
 				return { valid: false, tickDelta, rowDelta };
 			}
+			if (!isStartAllowed(newStart, note.durationTicks, note.noteDefinitionId, note.groupType, note.groupIndex)) {
+				return { valid: false, tickDelta, rowDelta };
+			}
 			if (note.groupType === 'triplet-eighth' && note.groupId) {
 				const entry = tripletSpans.get(note.groupId) ?? { min: Infinity, max: -Infinity };
 				entry.min = Math.min(entry.min, newStart);
@@ -880,7 +920,11 @@ export function previewSidebarDrop(request: SidebarDropRequest | null, point: { 
 			: [...Array(rowSpan).keys()].some((offset) =>
 					rowHasCollision(candidate.rowIndex + offset, candidate.startTick, durationTicks)
 			  );
-	const valid = respectsBarlines(candidate.startTick, durationTicks) && !collision;
+	const startsAllowed =
+		request.type === 'note'
+			? isStartAllowed(candidate.startTick, durationTicks, request.payload.definitionId, undefined, 0)
+			: true;
+	const valid = respectsBarlines(candidate.startTick, durationTicks) && !collision && startsAllowed;
 	showHighlight(candidate, valid, rowSpan, durationTicks);
 	if (!valid) {
 		clearExternalPreview();
@@ -954,6 +998,13 @@ export function handleSidebarDrop(request: SidebarDropRequest | null, point: { c
 	if (collisionDetected || !respectsBarlines(candidate.startTick, durationTicks)) {
 		clearExternalPreview();
 		return false;
+	}
+	if (request.type === 'note') {
+		const startsAllowed = isStartAllowed(candidate.startTick, durationTicks, request.payload.definitionId, undefined, 0);
+		if (!startsAllowed) {
+			clearExternalPreview();
+			return false;
+		}
 	}
 	if (request.type === 'note') {
 		dispatch('place', {
