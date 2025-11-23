@@ -606,7 +606,10 @@ let pausedAtSeconds = 0;
 								class:active={!multiSelectEnabled && selectedNoteId === option.id}
 								disabled={isNoteDisabled(option)}
 								on:click={() => handleNoteOptionSelect(option.id)}>
-								<span class="note-glyph" aria-hidden="true" style={`background-color: ${colorToHex(option.color)};`}>
+								<span
+									class="note-glyph"
+									aria-hidden="true"
+									style={`background-color: ${colorToHex(option.color)}; opacity: 0.8;`}>
 									<img
 										src={getLocalNoteIcon(option.id)}
 										alt=""
@@ -896,6 +899,7 @@ let pausedAtSeconds = 0;
 		min-height: calc(100vh - var(--dock-height));
 		height: calc(100vh - var(--dock-height));
 		overflow: hidden;
+		color: #1f2343;
 	}
 
 	.sidebar {
@@ -908,6 +912,22 @@ let pausedAtSeconds = 0;
 		overflow: hidden;
 		max-height: calc(100vh - var(--dock-height));
 		position: relative;
+		background: linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(250, 246, 255, 0.95)),
+			radial-gradient(circle at 20% 10%, rgba(255, 205, 175, 0.35), transparent 45%),
+			radial-gradient(circle at 80% 0%, rgba(167, 210, 255, 0.3), transparent 50%);
+		border: 1px solid rgba(255, 255, 255, 0.7);
+		box-shadow: 0 22px 55px rgba(31, 35, 67, 0.18);
+		color: #1f2343;
+	}
+
+	.sidebar::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background-image: radial-gradient(circle, rgba(255, 255, 255, 0.5) 1px, transparent 0);
+		background-size: 28px 28px;
+		opacity: 0.35;
+		pointer-events: none;
 	}
 
 	.sidebar.collapsed {
@@ -922,8 +942,8 @@ let pausedAtSeconds = 0;
 	}
 
 	.sidebar__toggle button {
-		border: 1px solid rgba(255, 255, 255, 0.15);
-		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(31, 35, 67, 0.1);
+		background: rgba(255, 255, 255, 0.9);
 		border-radius: 12px;
 		color: inherit;
 		padding: 0.25rem;
@@ -1005,15 +1025,17 @@ let pausedAtSeconds = 0;
 		gap: 0.75rem;
 		padding: 0.65rem 0.9rem;
 		border-radius: 16px;
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		background: rgba(255, 255, 255, 0.02);
-		color: inherit;
+		border: 2px solid rgba(31, 35, 67, 0.18);
+		background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(244, 244, 255, 0.92));
+		color: #1f2343;
 		cursor: pointer;
-		transition: border-color 0.2s ease, transform 0.15s ease;
+		box-shadow: 0 12px 28px rgba(31, 35, 67, 0.12);
+		transition: border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
 	}
 
 	.note-card:hover:not(:disabled) {
-		transform: translateY(-1px);
+		transform: translateY(-2px);
+		box-shadow: 0 16px 36px rgba(31, 35, 67, 0.18);
 	}
 
 	.note-card:disabled {
@@ -1022,8 +1044,8 @@ let pausedAtSeconds = 0;
 	}
 
 	.note-card.active {
-		border-color: var(--accent);
-		background: rgba(255, 209, 102, 0.08);
+		border-color: rgba(255, 173, 143, 0.9);
+		background: linear-gradient(125deg, rgba(255, 205, 155, 0.45), rgba(255, 155, 205, 0.45));
 	}
 
 	.note-card strong {
@@ -1043,7 +1065,8 @@ let pausedAtSeconds = 0;
 		justify-content: center;
 		padding: 4px;
 		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.08);
+		background: rgba(255, 255, 255, 0.85);
+		box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 	}
 
 	.note-glyph img {
@@ -1067,16 +1090,17 @@ let pausedAtSeconds = 0;
 
 	.motif-section button {
 		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.18);
-		background: rgba(255, 255, 255, 0.05);
-		color: inherit;
+		border: 1px solid rgba(31, 35, 67, 0.12);
+		background: rgba(255, 255, 255, 0.85);
+		color: #1f2343;
 		padding: 0.3rem 0.85rem;
 		cursor: pointer;
+		box-shadow: 0 10px 20px rgba(31, 35, 67, 0.1);
 	}
 
 	.motif-section button.active {
-		background: var(--accent);
-		color: #0b0f23;
+		background: linear-gradient(120deg, #ffb677, #ff8bc6);
+		color: #4a2056;
 	}
 
 	.motif-list {
@@ -1092,14 +1116,16 @@ let pausedAtSeconds = 0;
 		gap: 0.75rem;
 		padding: 0.55rem 0.8rem;
 		border-radius: 14px;
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		background: rgba(255, 255, 255, 0.02);
+		border: 1px solid rgba(255, 255, 255, 0.8);
+		background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(244, 246, 255, 0.92));
 		cursor: pointer;
+		box-shadow: 0 10px 24px rgba(31, 35, 67, 0.12);
+		color: #1f2343;
 	}
 
 	.motif-card.active {
-		border-color: var(--accent-2);
-		background: rgba(138, 180, 255, 0.07);
+		border-color: rgba(138, 180, 255, 0.9);
+		background: linear-gradient(135deg, rgba(138, 180, 255, 0.25), rgba(200, 255, 224, 0.25));
 	}
 
 	.motif-card .details strong {
@@ -1113,7 +1139,7 @@ let pausedAtSeconds = 0;
 	.motif-card .remove {
 		border: none;
 		background: transparent;
-		color: var(--muted);
+		color: rgba(31, 35, 67, 0.6);
 		cursor: pointer;
 	}
 
@@ -1132,26 +1158,34 @@ let pausedAtSeconds = 0;
 
 	.sidebar-actions button {
 		border-radius: 12px;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(31, 35, 67, 0.22);
+		background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(247, 245, 255, 0.9));
 		color: inherit;
+		box-shadow: 0 12px 24px rgba(31, 35, 67, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 		padding: 0.5rem 0.85rem;
 		cursor: pointer;
 		text-align: left;
+		transition: transform 0.15s ease, box-shadow 0.15s ease;
+	}
+
+	.sidebar-actions button:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 14px 28px rgba(31, 35, 67, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
 	}
 
 	.sidebar-actions button.active {
-		border-color: var(--accent);
-		background: rgba(255, 209, 102, 0.1);
+		border-color: rgba(255, 173, 143, 0.8);
+		background: linear-gradient(120deg, rgba(255, 205, 155, 0.55), rgba(255, 155, 205, 0.45));
 	}
 
 	.selection-panel {
-		border: 1px dashed rgba(255, 255, 255, 0.2);
+		border: 1px dashed rgba(31, 35, 67, 0.2);
 		border-radius: 12px;
 		padding: 0.65rem 0.85rem;
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
+		background: rgba(255, 255, 255, 0.65);
 	}
 
 	.selection-panel__actions {
@@ -1195,12 +1229,13 @@ let pausedAtSeconds = 0;
 	}
 
 	.exit-button {
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(31, 35, 67, 0.12);
+		background: rgba(255, 255, 255, 0.9);
 		color: inherit;
 		padding: 0.35rem 0.9rem;
 		border-radius: 999px;
 		cursor: pointer;
+		box-shadow: 0 10px 24px rgba(31, 35, 67, 0.12);
 	}
 
 	.workspace-header {
@@ -1209,6 +1244,10 @@ let pausedAtSeconds = 0;
 		align-items: flex-start;
 		gap: 1rem;
 		padding: 0.75rem 1.5rem 0.5rem;
+		background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(244, 244, 255, 0.9));
+		border: 1px solid rgba(255, 255, 255, 0.7);
+		box-shadow: 0 18px 40px rgba(31, 35, 67, 0.12);
+		color: #1f2343;
 	}
 
 	.title-block {
@@ -1254,13 +1293,17 @@ let pausedAtSeconds = 0;
 	}
 
 	.status--success {
-		background: rgba(46, 204, 113, 0.15);
-		border: 1px solid rgba(46, 204, 113, 0.4);
+		background: linear-gradient(120deg, #c8ffd9, #faffc7);
+		border: none;
+		color: #145135;
+		box-shadow: 0 10px 24px rgba(46, 204, 113, 0.25);
 	}
 
 	.status--error {
-		background: rgba(255, 107, 129, 0.15);
-		border: 1px solid rgba(255, 107, 129, 0.4);
+		background: linear-gradient(120deg, #ffd5e3, #ffe2d6);
+		border: none;
+		color: #7a1434;
+		box-shadow: 0 10px 24px rgba(255, 107, 129, 0.25);
 	}
 
 	.grid-stage {
@@ -1268,6 +1311,9 @@ let pausedAtSeconds = 0;
 		min-height: 0;
 		padding: 0.5rem;
 		overflow: hidden;
+		background: linear-gradient(140deg, #f7f4ff, #eaf0ff);
+		border: 1px solid rgba(255, 255, 255, 0.6);
+		box-shadow: 0 15px 30px rgba(31, 35, 67, 0.12);
 	}
 
 	.control-dock {
@@ -1279,7 +1325,9 @@ let pausedAtSeconds = 0;
 		align-items: center;
 		gap: 1rem;
 		padding: 0.75rem 1.5rem;
-		backdrop-filter: blur(16px);
+		background: linear-gradient(150deg, rgba(255, 255, 255, 0.98), rgba(244, 244, 255, 0.94));
+		border: 1px solid rgba(255, 255, 255, 0.75);
+		box-shadow: 0 18px 45px rgba(31, 35, 67, 0.15);
 	}
 
 	.dock-group {
@@ -1292,26 +1340,30 @@ let pausedAtSeconds = 0;
 	.control-dock button,
 	.control-dock label {
 		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(31, 35, 67, 0.12);
+		background: rgba(255, 255, 255, 0.9);
 		color: inherit;
 		padding: 0.4rem 0.9rem;
 		cursor: pointer;
 		display: inline-flex;
 		align-items: center;
 		gap: 0.35rem;
+		box-shadow: 0 12px 24px rgba(31, 35, 67, 0.12);
 	}
 
 	.control-dock .tempo select {
-		background: transparent;
-		border: none;
+		background: rgba(255, 255, 255, 0.95);
+		border: 1px solid rgba(31, 35, 67, 0.15);
 		color: inherit;
+		border-radius: 999px;
+		padding: 0.15rem 0.65rem;
+		box-shadow: 0 6px 18px rgba(31, 35, 67, 0.12);
 	}
 
 	.modal-backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(5, 6, 20, 0.8);
+		background: rgba(12, 18, 40, 0.6);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -1325,6 +1377,9 @@ let pausedAtSeconds = 0;
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
+		background: linear-gradient(140deg, rgba(255, 255, 255, 0.97), rgba(248, 248, 255, 0.95));
+		border: 1px solid rgba(255, 255, 255, 0.8);
+		color: #1f2343;
 	}
 
 	.dialog-actions {

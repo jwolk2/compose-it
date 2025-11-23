@@ -216,16 +216,22 @@ const noteBlockY = (rowIndex: number) => rowToY(rowIndex) + NOTE_VERTICAL_PADDIN
 		const meterConfig = METERS[meter];
 		const rows = getScaleRows();
 		const background = new Graphics();
-		const baseAlpha = 0.82;
-		const adjustedAlpha = hasBackground ? baseAlpha * 0.5 : baseAlpha;
-		background.roundRect(gridOriginX, gridOriginY, gridWidth, gridHeight, 12).fill(0x0b1221).alpha = adjustedAlpha;
+		const baseAlpha = 0.92;
+		const adjustedAlpha = hasBackground ? baseAlpha * 0.6 : baseAlpha;
+		background
+			.roundRect(gridOriginX, gridOriginY, gridWidth, gridHeight, 18)
+			.fill(0xf6faff)
+			.alpha = adjustedAlpha;
 		gridLayer.addChild(background);
 
 		const measureTicks = meterConfig.beatsPerMeasure * TICKS_PER_BEAT;
 		for (let row = 0; row <= rows.length; row += 1) {
 			const y = gridOriginY + row * cellHeight;
 			const line = new Graphics();
-			line.moveTo(gridOriginX, y).lineTo(gridOriginX + gridWidth, y).stroke({ color: 0x1d2a44, width: row % rows.length === 0 ? 2 : 1 });
+			line
+				.moveTo(gridOriginX, y)
+				.lineTo(gridOriginX + gridWidth, y)
+				.stroke({ color: 0x7a86b6, width: row % rows.length === 0 ? 2 : 1, alpha: row % rows.length === 0 ? 0.95 : 0.7 });
 			gridLayer.addChild(line);
 		}
 
@@ -233,9 +239,14 @@ const noteBlockY = (rowIndex: number) => rowToY(rowIndex) + NOTE_VERTICAL_PADDIN
 			const isBarline = tick % measureTicks === 0;
 			const x = gridOriginX + (tick / totalTicks) * gridWidth;
 			const line = new Graphics();
-			line.moveTo(x, gridOriginY)
+			line
+				.moveTo(x, gridOriginY)
 				.lineTo(x, gridOriginY + gridHeight)
-				.stroke({ color: isBarline ? 0xffffff : 0x2b3c5c, width: isBarline ? 2 : 1, alpha: isBarline ? 0.9 : 0.5 });
+				.stroke({
+					color: isBarline ? 0x2b2f4f : 0x8896c9,
+					width: isBarline ? 2.7 : 1.2,
+					alpha: isBarline ? 0.98 : 0.65
+				});
 			gridLayer.addChild(line);
 		}
 
@@ -247,7 +258,7 @@ const noteBlockY = (rowIndex: number) => rowToY(rowIndex) + NOTE_VERTICAL_PADDIN
 				line
 					.moveTo(x, gridOriginY)
 					.lineTo(x, gridOriginY + gridHeight)
-					.stroke({ color: 0x1c253d, width: 1, alpha: 0.35 });
+					.stroke({ color: 0xbfc7e5, width: 1, alpha: 0.4 });
 				gridLayer.addChild(line);
 			}
 		}
@@ -256,7 +267,10 @@ const noteBlockY = (rowIndex: number) => rowToY(rowIndex) + NOTE_VERTICAL_PADDIN
 	const renderLabels = () => {
 		labelLayer.removeChildren();
 		getScaleRows().forEach((label, index) => {
-			const text = new Text({ text: label, style: { fill: '#dfe6f2', fontSize: 12, fontFamily: 'Poppins, sans-serif' } });
+			const text = new Text({
+				text: label,
+				style: { fill: '#5b608c', fontSize: 12, fontFamily: 'Poppins, sans-serif' }
+			});
 			text.x = 10;
 			text.y = gridOriginY + index * cellHeight + cellHeight / 2 - 8;
 			labelLayer.addChild(text);

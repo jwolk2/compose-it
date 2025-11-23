@@ -26,6 +26,12 @@
 		showScalePrompt = false;
 	};
 
+	const handleScaleExit = () => {
+		pendingMeter = null;
+		showScalePrompt = false;
+		stage = 'home';
+	};
+
 	onMount(() => {
 		if (!browser) return;
 		const unsub = composerStore.subscribe((value) => {
@@ -43,7 +49,12 @@
 
 {#if stage === 'home'}
 	<HomeScreen on:select={handleMeterSelect} meters={Object.values(METERS)} />
-	<ScalePrompt open={showScalePrompt} scales={Object.values(SCALES)} on:select={handleScaleSelect} />
+	<ScalePrompt
+		open={showScalePrompt}
+		scales={Object.values(SCALES)}
+		on:select={handleScaleSelect}
+		on:exit={handleScaleExit}
+	/>
 {:else}
 	<ComposerWorkspace on:exit={() => (stage = 'home')} />
 {/if}
