@@ -22,9 +22,15 @@ const pulsesLabel = (count: number) => pulseNames[count] ?? count.toString();
 	<div class="hero">
 		<div class="hero-decoration" aria-hidden="true"></div>
 		<div class="logo-wrapper">
-			<div class="logo-badge">
+			<a
+				class="logo-badge"
+				href="https://nbsymphony.org/"
+				target="_blank"
+				rel="noreferrer"
+				aria-label="Visit the New Bedford Symphony Orchestra website"
+			>
 				<img src="/nbso-logo.png" alt="New Bedford Symphony Orchestra" loading="lazy" />
-			</div>
+			</a>
 		</div>
 		<h1><span>Compose-It</span></h1>
 		<p class="lede">
@@ -96,6 +102,7 @@ const pulsesLabel = (count: number) => pulseNames[count] ?? count.toString();
 		border-radius: 18px;
 		padding: 0.65rem 1.05rem;
 		box-shadow: 0 16px 38px rgba(0, 0, 0, 0.25);
+		text-decoration: none;
 	}
 
 	.logo-badge img {
